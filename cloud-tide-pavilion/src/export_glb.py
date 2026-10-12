@@ -8,7 +8,7 @@ import bpy
 
 def main(src, dst):
     bpy.ops.wm.open_mainfile(filepath=src)
-    keep = {"Architecture", "Site", "Courtyard", "Interior_Exhibits", "Terrace_Furniture"}
+    keep = {"Architecture", "Courtyard", "Interior_Exhibits", "Terrace_Furniture"}  # 不含水面、远山与岛屿
     for o in bpy.data.objects:
         names = {c.name for c in o.users_collection}
         parents = set()

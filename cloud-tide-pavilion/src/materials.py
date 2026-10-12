@@ -271,6 +271,7 @@ def bark(name="M_Bark", color=(0.16, 0.135, 0.11, 1)):
     t.link(ramp.outputs[0], b.inputs["Base Color"])
     t.link(bump.outputs[0], b.inputs["Normal"])
     t.link(b.outputs[0], t.out.inputs[0])
+    m.diffuse_color = color
     return m
 
 
