@@ -30,7 +30,7 @@ def label(img, text, size):
 
 def main(src, dst, W=2400, gap=10):
     head = 150
-    hero = Image.open(os.path.join(src, "hero.png")).convert("RGB")
+    hero = Image.open(os.path.join(src, "hero.jpg")).convert("RGB")
     hero = hero.resize((W, int(W * hero.height / hero.width)), Image.LANCZOS)
     pw = (W - 3 * gap) // 4
     ph = int(pw / 1.6)
@@ -49,7 +49,7 @@ def main(src, dst, W=2400, gap=10):
     sheet.paste(label(hero, "整体外观", 34), (0, head))
     y0 = head + hero.height + gap
     for k, (name, text) in enumerate(PANELS):
-        p = os.path.join(src, f"{name}.png")
+        p = os.path.join(src, f"{name}.jpg")
         if not os.path.exists(p):
             continue
         im = Image.open(p).convert("RGB")
