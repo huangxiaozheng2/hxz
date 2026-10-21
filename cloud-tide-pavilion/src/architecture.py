@@ -1,4 +1,4 @@
-"""建筑主体构件：屋顶、木肋、幕墙、柱、基座、平台、坡道、螺旋楼梯、栈桥。"""
+"""建筑主体构件：屋顶与天窗、胶合木梁、幕墙与框景窗、柱、基座与潮池、平台、坡道、电梯筒、翼尖支承、螺旋楼梯。"""
 import math
 import numpy as np
 import shapely
@@ -13,8 +13,9 @@ UP = np.array([0, 0, 1.0])
 
 
 # =================================================================== 工具
-def triangulate(rings, max_area=0.12, quality=28):
-    """rings: 闭合环列表（第一个为外轮廓）。返回 (verts2d, tris)。前 len(rings[0]) 个顶点即外轮廓。"""
+def triangulate(rings, max_area=0.12, quality=28, holes=None):
+    """rings: 闭合环列表（第一个为外轮廓）。返回 (verts2d, tris)。前 len(rings[0]) 个顶点即外轮廓。
+    holes: 洞内一点的列表（洞的边界须已包含在 rings 中）。"""
     V, S, off = [], [], 0
     for r in rings:
         n = len(r)
@@ -22,7 +23,10 @@ def triangulate(rings, max_area=0.12, quality=28):
         S.append(np.stack([np.arange(n) + off, (np.arange(n) + 1) % n + off], 1))
         off += n
     V = np.vstack(V); S = np.vstack(S)
-    out = triangle.triangulate({"vertices": V, "segments": S}, f"pYq{quality}a{max_area}")
+    data = {"vertices": V, "segments": S}
+    if holes:
+        data["holes"] = np.asarray(holes, float)
+    out = triangle.triangulate(data, f"pYq{quality}a{max_area}")
     return out["vertices"], out["triangles"]
 
 
@@ -69,12 +73,14 @@ def band(pts2, zb, zt, o0, o1, nrm2, closed=True, cap=True):
 
 
 # =================================================================== 屋顶
-def build_roof(roof, M, parent):
+def build_roof(roof, M, parent, skylights=()):
     coll = collection(roof.name, parent)
     poly = roof.poly
     outer = ccw(resample_ring(poly.exterior.coords, 0.16))
     rings = [outer] + offset_rings(poly, [P.REVEAL, 0.45, 0.75], 0.2) + offset_rings(poly, [1.6, 3.2], 0.45)
-    V2, T = triangulate(rings, max_area=0.10)
+    sky_rings = [ccw(resample_ring(h.exterior.coords, 0.12)) for h in skylights]
+    holes = [h.representative_point().coords[0] for h in skylights]
+    V2, T = triangulate(rings + sky_rings, max_area=0.10, holes=holes)
     nb = len(outer)
     d = roof.dist_edge(V2[:, 0], V2[:, 1])
     d[:nb] = 0.0
@@ -115,13 +121,36 @@ def build_roof(roof, M, parent):
     trim_f = [[i - rim_off for i in f] for f in rim_faces]
     mesh_object(f"{roof.name}_EdgeTrim", trim_v, trim_f, coll, [M["metal"]])
 
-    build_ribs(roof, M, coll)
+    if skylights:
+        build_skylights(roof, skylights, M, coll)
+    build_ribs(roof, M, coll, skylights=skylights)
     return coll
 
 
-def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0):
-    """檐下浅木色细肋：以庭院中心为极点径向排布，沿屋面底部曲率连续，端部统一收于阴影缝内线。"""
+def build_skylights(roof, holes, M, coll):
+    """屋面光缝：洞口四周金属内衬贯通屋面厚度，顶部嵌超白玻璃，玻璃随屋面曲率。"""
+    lining, glass = MeshBuf(), MeshBuf()
+    for h in holes:
+        ring = ccw(resample_ring(h.exterior.coords, 0.1))
+        d = roof.dist_edge(ring[:, 0], ring[:, 1])
+        top, bot = roof.surfaces(ring[:, 0], ring[:, 1], d)
+        under = bot - roof.rib_depth(d)
+        nrm, _ = ring_normals(ring)
+        v, f, uv = band(ring, under - 0.01, top + 0.02, 0.0, 0.025, nrm)
+        lining.add(v, f)
+        V2, T = triangulate([ring], 0.05, 25)
+        gt, _ = roof.surfaces(V2[:, 0], V2[:, 1])
+        glass.add(np.c_[V2, gt - 0.05], T.tolist())
+    lining.build(f"{roof.name}_Skylight_Lining", coll, [M["metal"]], smooth=False)
+    glass.build(f"{roof.name}_Skylight_Glass", coll, [M["glass"]], smooth=False)
+
+
+def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
+    """檐下胶合木径向梁：以庭院中心为极点排布，沿屋面底部曲率连续；截面高度由檐口 100 mm
+    向支座方向加深到 340 mm（悬挑弯矩越大截面越高），端部统一收于阴影缝内线。"""
     inset = roof.poly.buffer(-(P.REVEAL + 0.04), 64)
+    for h in skylights:
+        inset = inset.difference(h.buffer(0.06, 16))
     shapely.prepare(inset)
     dth = spacing / r_ref
     ths = np.arange(math.radians(roof.ts) + dth / 2, math.radians(roof.te), dth)
@@ -162,16 +191,18 @@ def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0):
         allp.append(np.stack([r * math.cos(th[k]), r * math.sin(th[k])], 1))
         meta.append((th[k], r))
     P2 = np.vstack(allp)
-    _, zb_all = roof.surfaces(P2[:, 0], P2[:, 1])
+    d_all = roof.dist_edge(P2[:, 0], P2[:, 1])
+    _, zb_all = roof.surfaces(P2[:, 0], P2[:, 1], d_all)
+    dep_all = roof.rib_depth(d_all)
     idx = 0
     rng = np.random.default_rng(7)
     for (t, r) in meta:
         m = len(r)
-        zb = zb_all[idx: idx + m]; idx += m
+        zb = zb_all[idx: idx + m]; dep = dep_all[idx: idx + m]; idx += m
         e = np.array([-math.sin(t), math.cos(t)])
         c = np.stack([r * math.cos(t), r * math.sin(t)], 1)
         w = np.clip(0.045 + 0.16 * r * dth, 0.05, 0.11)
-        z_up = zb + 0.03; z_dn = zb - P.RIB_DEPTH
+        z_up = zb + 0.03; z_dn = zb - dep
         corners = [(-0.5, z_dn), (0.5, z_dn), (0.5, z_up), (-0.5, z_up)]
         V = np.zeros((m, 4, 3))
         for q, (s, z) in enumerate(corners):
@@ -199,9 +230,9 @@ def envelope_ring(poly, step=0.04):
 
 
 def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), doors=(), column_every=3,
-                   column_skip=(), moon=None):
-    """玻璃幕墙：等宽分段，竖梃与室内柱位对应；顶部金属收口带封至屋面底板。
-    solid: [(i0,i1)] 以竖梃编号表示的实墙段；doors: [bay 编号]。"""
+                   column_skip=(), moon=None, windows=(), column_side="outer"):
+    """幕墙：等宽分段，竖梃与室内柱位对应；顶部金属收口带封至木梁底。
+    solid: [(i0,i1)] 以竖梃编号表示的实墙段；windows: 实墙中的框景窗 [(i0,i1)]；doors: [bay 编号]。"""
     coll = collection(name, parent)
     dense = envelope_ring(poly)
     seg = np.linalg.norm(np.roll(dense, -1, 0) - dense, axis=1)
@@ -212,10 +243,11 @@ def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), door
     closed = np.vstack([dense, dense[:1]])
     mp = np.stack([np.interp(sm, s, closed[:, 0]), np.interp(sm, s, closed[:, 1])], 1)
     nrm, tan = ring_normals(mp)
-    _, soff = roof.surfaces(mp[:, 0], mp[:, 1])
-    z_head = soff - P.RIB_DEPTH - 0.04
+    z_head = roof.underside(mp[:, 0], mp[:, 1]) - 0.04
     if callable(solid):
         solid = solid(mp, nrm)
+    if callable(windows):
+        windows = windows(mp, nrm)
     if callable(doors):
         doors = doors(mp, nrm)
     if callable(moon):
@@ -268,7 +300,7 @@ def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), door
     # 底槛 / 顶部收口带（连续）
     dn, _ = ring_normals(dense)
     _, dso = roof.surfaces(dense[:, 0], dense[:, 1])
-    dhead = dso - P.RIB_DEPTH - 0.04
+    dhead = roof.underside(dense[:, 0], dense[:, 1]) - 0.04
     v, f, uv = band(dense, floor_z - 0.01, floor_z + 0.07, -0.09, 0.05, dn)
     metal.add(v, f)
     v, f, uv = band(dense, dhead, dso + 0.04, -0.10, 0.07, dn)
@@ -276,17 +308,54 @@ def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), door
     # 室内侧暗藏灯带：向上洗亮木肋
     v, f, uv = band(dense, dhead - 0.02, dhead, -0.16, -0.10, dn)
     led.add(v, f)
-    # 实墙段
+    # 实墙段（其中的框景窗：墙体只留窗下与窗上部分，外挑深窗框）
+    def span_sel(a, b):
+        sa, sb = sm[a % n], (sm[b] if b < n else L)
+        return (s[:-1] >= sa - 1e-6) & (s[:-1] <= sb + 1e-6)
+
+    sill_z, head_z = floor_z + 0.55, floor_z + 3.15
+    frames = MeshBuf()
     for a, b in solid:
         if moon and (a, b) == tuple(moon):
             continue
-        sa, sb = sm[a % n], sm[b % n] if b < n else L
-        sel = (s[:-1] >= sa - 1e-6) & (s[:-1] <= sb + 1e-6)
-        pts = dense[sel]; nn = dn[sel]; zz = dso[sel]
-        if len(pts) < 2:
-            continue
-        v, f, uv = band(pts, floor_z - 0.01, zz + 0.03, -0.22, 0.12, nn, closed=False)
-        wall.add(v, f, uv=uv)
+        cuts = sorted(w for w in windows if a <= w[0] and w[1] <= b)
+        edges = [a]
+        for wa, wb in cuts:
+            edges += [wa, wb]
+        edges.append(b)
+        for k in range(0, len(edges) - 1):
+            pa, pb = edges[k], edges[k + 1]
+            if pb <= pa:
+                continue
+            sel = span_sel(pa, pb)
+            pts = dense[sel]; nn = dn[sel]; zz = dso[sel]
+            if len(pts) < 2:
+                continue
+            if k % 2 == 0:          # 整片实墙
+                v, f, uv = band(pts, floor_z - 0.01, zz + 0.03, -0.22, 0.12, nn, closed=False)
+                wall.add(v, f, uv=uv)
+            else:                   # 框景窗
+                v, f, uv = band(pts, floor_z - 0.01, sill_z, -0.22, 0.12, nn, closed=False)
+                wall.add(v, f, uv=uv)
+                v, f, uv = band(pts, head_z, zz + 0.03, -0.22, 0.12, nn, closed=False)
+                wall.add(v, f, uv=uv)
+                for i in range(len(pts) - 1):
+                    glass.add([[*pts[i], sill_z], [*pts[i + 1], sill_z], [*pts[i + 1], head_z], [*pts[i], head_z]],
+                              [[0, 1, 2, 3]])
+                # 外挑深窗框：上下框沿墙曲线，两侧竖框
+                for z0, z1 in ((sill_z - 0.07, sill_z), (head_z, head_z + 0.07)):
+                    v, f, uv = band(pts, z0, z1, 0.0, 0.62, nn, closed=False)
+                    frames.add(v, f)
+                for end in (0, -1):
+                    p = pts[end]; q = nn[end]
+                    tdir = pts[min(end + 1, len(pts) - 1) if end == 0 else end - 1] - p
+                    tdir = tdir / (np.linalg.norm(tdir) + 1e-9)
+                    o = p + q * 0.31 + tdir * 0.035
+                    v, f = oriented_box(np.r_[o, sill_z - 0.07], np.r_[o, head_z + 0.07], 0.62, 0.07,
+                                        np.r_[tdir, 0])
+                    frames.add(v, f)
+    if frames.v:
+        frames.build(f"{name}_WindowFrames", coll, [M["bronze_satin"]], smooth=False)
     if moon:
         a, b = moon
         sa, sb = sm[a], (sm[b] if b < n else L)
@@ -304,7 +373,9 @@ def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), door
     for i in (range(0, n, column_every) if column_every else []):
         if is_solid(i) or i in column_skip:
             continue
-        if radial_out[i] < 0.35:        # 柱列只沿外侧幕墙布置，庭院侧保持通透
+        if column_side == "outer" and radial_out[i] < 0.35:
+            continue
+        if column_side == "inner" and radial_out[i] > -0.35:
             continue
         c = mp[i] - nrm[i] * 0.85
         if not poly.buffer(-0.4).contains(Point(*c)):
@@ -312,9 +383,9 @@ def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), door
         col_pts.append(c)
     if col_pts:
         cp = np.array(col_pts)
-        _, csoff = roof.surfaces(cp[:, 0], cp[:, 1])
-        for c, zs in zip(cp, csoff):
-            add_column(cols, c, floor_z, zs)
+        cund = roof.underside(cp[:, 0], cp[:, 1])
+        for c, zu in zip(cp, cund):
+            add_column(cols, c, floor_z, zu)
         cols.build(f"{name}_Columns", coll, [M["metal"]], smooth=True)
     return coll, mp, nrm, z_head
 
@@ -378,9 +449,9 @@ def moon_wall(name, pts, nrm, z0, ztop, M, coll, thick=0.34, hole_r=1.1):
                 coll, [M["glass"]], smooth=False)
 
 
-def add_column(buf, c, z0, z_soffit, r=0.095):
-    """细长柱：柱脚节点（底板+套环）、柱身、外张柱头与顶板。"""
-    top = z_soffit - P.RIB_DEPTH - 0.01
+def add_column(buf, c, z0, z_under, r=0.095):
+    """细长柱：柱脚节点（底板+套环）、柱身、外张柱头与顶板；柱头顶板承于木梁底。"""
+    top = z_under - 0.01
     prof = [
         (0.0, z0), (0.24, z0), (0.24, z0 + 0.025), (0.205, z0 + 0.03),       # 底板
         (0.13, z0 + 0.035), (0.13, z0 + 0.16), (r + 0.004, z0 + 0.175),     # 套环
@@ -396,34 +467,116 @@ def add_column(buf, c, z0, z_soffit, r=0.095):
 
 
 # =================================================================== 基座 / 平台
-def build_plinth(poly, z, M, parent, name="Plinth", lip=0.30, recess=0.6, depth=-1.2, led=True, mat="stone"):
+def build_plinth(poly, z, M, parent, name="Plinth", lip=0.30, recess=0.6, depth=-1.7, led=True, mat="stone",
+                 cut=None):
+    """浮于水面的石材基座：挑出的檐口 + 内凹深色基座 + 檐下灯带。
+    cut：潮池与水口区域；沿其边缘改为直落池底的石材池壁。"""
     coll = collection(name, parent)
-    outer = ccw(resample_ring(poly.exterior.coords, 0.25))
+    outer = ccw(resample_ring(poly.exterior.coords, 0.22))
     V2, T = triangulate([outer], max_area=4.0, quality=20)
     mesh_object(f"{name}_Top", np.c_[V2, np.full(len(V2), z)], T, coll, [M[mat]], smooth=False)
     nrm, _ = ring_normals(outer)
-    edge = MeshBuf()
-    v, f, uv = band(outer, z - lip, z, -0.01, 0.0, nrm)
-    edge.add(v, f)
-    # 檐口底面与凹入的阴影基座
-    v, f, uv = band(outer, z - lip - 0.01, z - lip, -recess, 0.0, nrm)
-    edge.add(v, f)
+    if cut is not None:
+        wallmask = shapely.distance(cut, shapely.points(outer)) < 0.06
+    else:
+        wallmask = np.zeros(len(outer), bool)
+    edge, base, lb, pool = MeshBuf(), MeshBuf(), MeshBuf(), MeshBuf()
+    for mask, kind in ((~wallmask, "edge"), (wallmask, "wall")):
+        idx = np.where(mask)[0]
+        if not len(idx):
+            continue
+        runs = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+        if mask[0] and mask[-1] and len(runs) > 1:
+            runs = [np.concatenate([runs[-1], runs[0]])] + runs[1:-1]
+        closed = len(runs) == 1 and len(runs[0]) == len(outer)
+        for rr in runs:
+            if len(rr) < 2:
+                continue
+            if not closed:          # 与相邻段搭接一个点，避免缝隙
+                rr = np.concatenate([[(rr[0] - 1) % len(outer)], rr, [(rr[-1] + 1) % len(outer)]])
+            pts, nn = outer[rr], nrm[rr]
+            if kind == "edge":
+                v, f, uv = band(pts, z - lip, z, -0.01, 0.0, nn, closed=closed)
+                edge.add(v, f)
+                v, f, uv = band(pts, z - lip - 0.01, z - lip, -recess, 0.0, nn, closed=closed)
+                edge.add(v, f)
+                v, f, uv = band(pts, depth, z - lip, -recess - 0.4, -recess, nn, closed=closed)
+                base.add(v, f)
+                if led:
+                    v, f, uv = band(pts, z - lip - 0.02, z - lip - 0.012, -0.16, -0.08, nn, closed=closed)
+                    lb.add(v, f)
+            else:
+                v, f, uv = band(pts, depth, z, -0.35, 0.0, nn, closed=closed)
+                pool.add(v, f)
     edge.build(f"{name}_EdgeFascia", coll, [M["stone_edge"]], smooth=False)
-    base = MeshBuf()
-    v, f, uv = band(outer, depth, z - lip, -recess - 0.4, -recess, nrm)
-    base.add(v, f)
     base.build(f"{name}_RecessedBase", coll, [M["plinth"]], smooth=False)
     if led:
-        lb = MeshBuf()
-        v, f, uv = band(outer, z - lip - 0.02, z - lip - 0.012, -0.16, -0.08, nrm)
-        lb.add(v, f)
         lb.build(f"{name}_UnderLipLED", coll, [M["led"]], smooth=False)
+    if pool.v:
+        pool.build(f"{name}_TidalPoolWalls", coll, [M["stone_tidal"]], smooth=False)
+    return coll
+
+
+def prism(buf, poly, z0, z1, step=0.2, area=0.6):
+    """平面多边形拉伸成实体（顶面 + 外周侧壁）。"""
+    parts = [poly] if poly.geom_type == "Polygon" else list(poly.geoms)
+    for p in parts:
+        if p.area < 0.05:
+            continue
+        ring = ccw(resample_ring(p.exterior.coords, step))
+        inner = [ccw(resample_ring(i.coords, step))[::-1] for i in p.interiors]
+        holes = [Polygon(i.coords).representative_point().coords[0] for i in p.interiors]
+        V2, T = triangulate([ring] + inner, area, 20, holes=holes or None)
+        buf.add(np.c_[V2, np.full(len(V2), z1)], T.tolist())
+        for rg in [ring] + inner:
+            nn, _ = ring_normals(rg)
+            v, f, uv = band(rg, z0, z1, -0.01, 0.0, nn)
+            buf.add(v, f)
+
+
+def build_tidal_basin(M, parent):
+    """阶梯式潮池：四级台阶由首层标高降至池底，经水口与外部水面相通；
+    高潮位时池水漫至第三级，落潮时池底与潮痕全部露出。"""
+    coll = collection("Courtyard_TidalBasin", parent)
+    buf = MeshBuf()
+    ch = P.CHANNEL
+    for r_out, r_in, z in P.BASIN_STEPS:
+        ring = Point(0, 0).buffer(r_out, 128).difference(Point(0, 0).buffer(r_in, 128)).difference(ch)
+        prism(buf, ring, P.BASIN_FLOOR - 0.05, z)
+    floor = Point(0, 0).buffer(P.BASIN_STEPS[-1][1] + 0.02, 128).union(ch.intersection(P.PLINTH_ALL.buffer(0.4, 32)))
+    floor = floor.union(Point(0, 0).buffer(P.BASIN_R, 128).intersection(ch))
+    prism(buf, floor, -1.7, P.BASIN_FLOOR)
+    buf.build("TidalBasin_Steps", coll, [M["stone_tidal"]], smooth=False)
+    # 横跨水口的两座步行桥（首层标高，侧面金属收边 + 玻璃栏板）
+    br = MeshBuf()
+    g, m = MeshBuf(), MeshBuf()
+    for r_mid, width in ((8.3, 1.8), (11.6, 1.5)):
+        c = P.AXIS * r_mid
+        a, n_ = P.AXIS * width / 2, P.AXIS_N * (P.CHANNEL_W / 2 + 0.01)
+        quad = Polygon([c - a - n_, c + a - n_, c + a + n_, c - a + n_])
+        prism(br, quad, P.FFL - 0.22, P.FFL - 0.002)
+        for sgn in (-1, 1):
+            p0 = c + a * sgn * 0.98 - P.AXIS_N * (P.CHANNEL_W / 2)
+            p1 = c + a * sgn * 0.98 + P.AXIS_N * (P.CHANNEL_W / 2)
+            balustrade(g, m, np.stack([p0, p1]), P.FFL, height=1.05, panel=1.4)
+    br.build("Channel_Footbridges", coll, [M["stone"]], smooth=False)
+    # 水口两侧栏板（在桥处断开）
+    for sgn in (-1, 1):
+        off = P.AXIS_N * sgn * (P.CHANNEL_W / 2 + 0.25)
+        segs = [(P.BASIN_R + 0.2, 8.3 - 0.9 - 0.05), (8.3 + 0.9 + 0.05, 11.6 - 0.75 - 0.05)]
+        for r0, r1 in segs:
+            pts = np.stack([P.AXIS * r0 + off, P.AXIS * r1 + off])
+            if shapely.contains_xy(P.PLINTH_CUT, *pts.mean(0)):
+                balustrade(g, m, pts, P.FFL, height=1.05, panel=1.4)
+    g.build("Channel_Balustrade_Glass", coll, [M["glass_rail"]], smooth=False)
+    m.build("Channel_Balustrade_Rail", coll, [M["metal"]], smooth=True)
     return coll
 
 
 def balustrade(buf_glass, buf_metal, pts, z_base, height=1.08, panel=1.5, closed=False, nrm=None,
-               zfun=None):
-    """玻璃栏板：分段玻璃 + 顶部圆管扶手 + 底部压条。pts 为平面折线。"""
+               zfun=None, zs=None):
+    """玻璃栏板：分段玻璃 + 顶部圆管扶手 + 底部压条。pts 为平面折线；
+    zs 为每个折线点的底标高（用于坡道、楼梯等斜向栏板）。"""
     pts = np.asarray(pts, float)
     if closed:
         pts = np.vstack([pts, pts[:1]])
@@ -432,10 +585,18 @@ def balustrade(buf_glass, buf_metal, pts, z_base, height=1.08, panel=1.5, closed
     L = s[-1]
     if L < 0.3:
         return
+    if zs is not None:
+        zs = np.asarray(zs, float)
+        zfun = None
     n = max(1, int(round(L / panel)))
     sm = np.linspace(0, L, max(int(L / 0.12), 4))
     path = np.stack([np.interp(sm, s, pts[:, 0]), np.interp(sm, s, pts[:, 1])], 1)
-    zb = np.full(len(path), z_base) if zfun is None else zfun(path)
+
+    def zat(ss, q):
+        if zs is not None:
+            return np.interp(ss, s, zs)
+        return np.full(len(q), z_base) if zfun is None else zfun(q)
+    zb = zat(sm, path)
     _, nn = frames_along(np.c_[path, zb])
     nn2 = nn[:, :2]
     # 底部压条
@@ -451,7 +612,7 @@ def balustrade(buf_glass, buf_metal, pts, z_base, height=1.08, panel=1.5, closed
         a, b = edges[k] + 0.006, edges[k + 1] - 0.006
         ss = np.linspace(a, b, max(2, int((b - a) / 0.2) + 1))
         q = np.stack([np.interp(ss, s, pts[:, 0]), np.interp(ss, s, pts[:, 1])], 1)
-        qz = np.full(len(q), z_base) if zfun is None else zfun(q)
+        qz = zat(ss, q)
         V = []; F = []
         for i in range(len(q)):
             V.append([q[i, 0], q[i, 1], qz[i] + 0.08]); V.append([q[i, 0], q[i, 1], qz[i] + height - 0.035])
@@ -461,23 +622,84 @@ def balustrade(buf_glass, buf_metal, pts, z_base, height=1.08, panel=1.5, closed
         # 玻璃夹 / 扶手支撑
     for k in range(n + 1):
         x = np.interp(edges[k], s, pts[:, 0]); y = np.interp(edges[k], s, pts[:, 1])
-        zz = z_base if zfun is None else float(zfun(np.array([[x, y]]))[0])
+        zz = float(zat(np.array([edges[k]]), np.array([[x, y]]))[0])
         v, f, _ = tube([[x, y, zz + height - 0.07], [x, y, zz + height - 0.02]], 0.012, 8)
         buf_metal.add(v, f)
 
 
-def build_moon_gate(M, parent, theta=137.5, r0=10.0, r1=14.2):
-    """屋面平台西端的框景墙：径向布置的直墙，圆形开口正对二层观景厅，
-    远处水面与天空穿过开口进入室内；墙顶贴合次屋顶底面，形成承托关系。"""
+def build_moon_gate(M, parent):
+    """月洞墙：位于屋面平台西端，墙面正对冬至日落方位；圆洞对准二层观景厅，
+    冬至傍晚夕阳穿洞入室。墙两端在顶部以凹曲线外张、贴合次屋顶底面——与柱头同一曲线语言，
+    也是次屋顶的承重墙之一。"""
     coll = collection("Terrace_MoonGate", parent)
-    a = math.radians(theta)
-    rr = np.linspace(r0, r1, 60)
-    pts = np.stack([rr * math.cos(a), rr * math.sin(a)], 1)
-    nrm = np.repeat([[-math.sin(a), math.cos(a)]], len(rr), 0)
-    _, sb = P.ROOF_B.surfaces(pts[:, 0], pts[:, 1])
-    inside = shapely.contains_xy(P.ROOF_B.poly.buffer(-0.3), pts[:, 0], pts[:, 1])
-    top = np.where(inside, sb + 0.03, P.DECK + 3.6)
-    moon_wall("MoonGate_Wall", pts, nrm, P.DECK - 0.05, top, M, coll, thick=0.38, hole_r=1.42)
+    c, ax, nrm = P.MOON_C, P.AXIS_N, P.AXIS          # 墙沿 AXIS_N 延伸，法向朝日落
+    half, z0 = P.MOON_HALF, P.DECK - 0.05
+    fw, fh = 0.9, 1.6                                 # 顶部外张宽度 / 高度
+
+    def ztop(u):
+        q = c[None] + ax[None] * np.atleast_1d(u)[:, None]
+        _, bot = P.ROOF_B.surfaces(q[:, 0], q[:, 1])
+        return bot + 0.03
+    # 立面轮廓 (u, z)：下段竖直，上段凹曲线外张至屋面
+    us = np.linspace(-(half + fw), half + fw, 70)
+    zt = ztop(us)
+    prof = [(-half, z0), (half, z0)]
+    for k in range(1, 13):
+        t = k / 12
+        u = half + fw * t ** 2.4
+        prof.append((u, float(ztop(np.array([u]))[0]) - fh * (1 - t)))
+    prof += [(u, z) for u, z in zip(us[::-1], zt[::-1])][1:-1]
+    for k in range(12, 0, -1):
+        t = k / 12
+        u = -(half + fw * t ** 2.4)
+        prof.append((u, float(ztop(np.array([u]))[0]) - fh * (1 - t)))
+    outer2 = np.array(prof)
+    hr = P.MOON_HOLE_R
+    hc = (0.0, P.DECK + 0.5 + hr)
+    a_ = np.linspace(0, 2 * np.pi, 120, endpoint=False)
+    hole = np.stack([hc[0] + hr * np.cos(a_), hc[1] + hr * np.sin(a_)], 1)
+    V = np.vstack([outer2, hole]); no = len(outer2)
+    S = np.vstack([np.stack([np.arange(no), (np.arange(no) + 1) % no], 1),
+                   np.stack([np.arange(120) + no, (np.arange(120) + 1) % 120 + no], 1)])
+    out = triangle.triangulate({"vertices": V, "segments": S, "holes": [hc]}, "pYq25a0.04")
+    V2, T = out["vertices"], out["triangles"]
+    th = 0.42
+
+    def place(uv, off):
+        q = c[None] + ax[None] * uv[:, 0:1] + nrm[None] * off
+        return np.c_[q, uv[:, 1]]
+    Fv, Bv = place(V2, th / 2), place(V2, -th / 2)
+    N = len(V2)
+    faces = [list(t) for t in T] + [list(t[::-1] + N) for t in T]
+    verts = [Fv, Bv]
+    for loop in (np.arange(no), np.arange(no, no + 120)[::-1]):
+        base = sum(len(v) for v in verts)
+        verts += [Fv[loop], Bv[loop]]
+        m = len(loop)
+        for i in range(m):
+            j = (i + 1) % m
+            faces.append([base + j, base + i, base + m + i, base + m + j])
+    mesh_object("MoonGate_Wall", np.vstack(verts), faces, coll, [M["wall"]], smooth=False)
+    # 洞口拉丝金属内衬 + 超白玻璃
+    ring = MeshBuf()
+    cen = place(np.array([hc]), 0)[0]
+    Vr, Fr = [], []
+    for k in range(120):
+        pth = place(hole[k:k + 1], 0)[0]
+        rad = (pth - cen) / np.linalg.norm(pth - cen)
+        for dr, dt in ((0.0, -th / 2 - 0.015), (0.0, th / 2 + 0.015), (-0.04, th / 2 + 0.015), (-0.04, -th / 2 - 0.015)):
+            Vr.append(pth + rad * dr + np.r_[nrm, 0] * dt)
+    for k in range(120):
+        j = (k + 1) % 120
+        for q in range(4):
+            q2 = (q + 1) % 4
+            Fr.append([k * 4 + q, k * 4 + q2, j * 4 + q2, j * 4 + q])
+    ring.add(Vr, Fr)
+    ring.build("MoonGate_MetalReveal", coll, [M["metal"]], smooth=True)
+    gp = place(hole, 0.0)
+    gp = cen + (gp - cen) * 0.97
+    mesh_object("MoonGate_Glass", np.vstack([gp, cen[None]]), [[k, (k + 1) % 120, 120] for k in range(120)],
+                coll, [M["glass"]], smooth=False)
     return coll
 
 
@@ -497,7 +719,7 @@ def build_deck(M, parent):
     g, m = MeshBuf(), MeshBuf()
     th = np.degrees(np.arctan2(outer[:, 1], outer[:, 0])) % 360
     r = np.hypot(outer[:, 0], outer[:, 1])
-    landing = (np.abs(th - (P.RAMP_T1 % 360)) < 8.5) & (r < 9.6)
+    landing = (np.abs(th - (P.RAMP_END_DEG % 360)) < 8.5) & (r < 9.6)
     e3 = P.E3.buffer(0.35)
     in_e3 = shapely.contains_xy(e3, outer[:, 0], outer[:, 1])
     ok = ~(landing | in_e3)
@@ -518,23 +740,14 @@ def build_deck(M, parent):
 
 
 # =================================================================== 坡道
-def ramp_z(theta_deg):
-    t0, t1 = P.RAMP_T0, P.RAMP_T1
-    u = np.clip((np.asarray(theta_deg) - t0 - 5) / (t1 - t0 - 13), 0, 1)
-    return P.FFL + (P.DECK - P.FFL) * u
-
-
-def ramp_theta(q):
-    th = np.degrees(np.arctan2(q[:, 1], q[:, 0])) % 360
-    return np.where(th < P.RAMP_T0 - 2, th + 360, th)
-
-
 def build_ramp(M, parent):
+    """绕潮池上升的无障碍坡道：坡度 1:12，每升约 0.68 m 设 1.5 m 休息平台，共约 1.96 圈；
+    上下两圈净高约 2.5 m。外侧一圈细柱以短悬臂托住各圈坡道。"""
     coll = collection("Courtyard_Ramp", parent)
     R, W = P.RAMP_R, P.RAMP_W
-    th = np.linspace(P.RAMP_T0, P.RAMP_T1, 520)
-    z = ramp_z(th)
-    rad = np.radians(th)
+    phi = np.arange(P.RAMP_START_DEG, P.RAMP_END_DEG + 0.01, 0.5)
+    z = P.ramp_z_of_deg(phi)
+    rad = np.radians(phi)
     c = np.stack([R * np.cos(rad), R * np.sin(rad), z], 1)
     out = np.stack([np.cos(rad), np.sin(rad), np.zeros_like(rad)], 1)   # 径向外
     hw = W / 2
@@ -544,8 +757,7 @@ def build_ramp(M, parent):
     v, f, uv = sweep(c, prof, nrm=out)
     slab = MeshBuf(); slab.add(v, f)
     # 端部平台：落于屋面平台
-    a = math.radians(P.RAMP_T1)
-    ang = np.radians(np.linspace(P.RAMP_T1 - 7.5, P.RAMP_T1 + 6.5, 30))
+    ang = np.radians(np.linspace(P.RAMP_END_DEG - 7.5, P.RAMP_END_DEG + 6.5, 30))
     land = Polygon(np.vstack([
         np.stack([(R - hw) * np.cos(ang), (R - hw) * np.sin(ang)], 1),
         np.stack([9.2 * np.cos(ang[::-1]), 9.2 * np.sin(ang[::-1])], 1)]))
@@ -556,20 +768,16 @@ def build_ramp(M, parent):
     v, f, uv = band(lr, P.DECK - 0.26, P.DECK, -0.02, 0.0, ln)
     slab.add(v, f)
     slab.build("Ramp_Slab", coll, [M["wall"]], smooth=True)
-    # 坡面铺装（顶面略高）
-    top = []
-    for side in (-hw + 0.02, hw - 0.02):
-        top.append(c + out * side + [0, 0, 0.008])
-    V = np.vstack([top[0], top[1]]); n = len(c)
+    # 坡面铺装
+    top = [c + out * side + [0, 0, 0.008] for side in (-hw + 0.02, hw - 0.02)]
+    V = np.vstack(top); n = len(c)
     F = [[i, i + 1, n + i + 1, n + i] for i in range(n - 1)]
     mesh_object("Ramp_Paving", V, F, coll, [M["stone"]], smooth=False)
-    # 栏板 + 灯带
+    # 栏板 + 坡道边缘暗藏灯带
     g, m, led = MeshBuf(), MeshBuf(), MeshBuf()
     for side in (-hw + 0.06, hw - 0.06):
         pts = c[:, :2] + out[:, :2] * side
-        zf = lambda q: ramp_z(ramp_theta(q))
-        balustrade(g, m, pts[:-12], 0, height=1.05, zfun=zf)
-        # 坡道边缘暗藏灯带
+        balustrade(g, m, pts[:-14], 0, height=1.05, zs=z[:-14])
         sgn = np.sign(side)
         e = c + out * (sgn * (hw + 0.004)) + [0, 0, -0.045]
         v, f, uv = tube(e, 0.012, 6, cap=True)
@@ -577,18 +785,86 @@ def build_ramp(M, parent):
     g.build("Ramp_Balustrade_Glass", coll, [M["glass_rail"]], smooth=False)
     m.build("Ramp_Balustrade_Rail", coll, [M["metal"]], smooth=True)
     led.build("Ramp_EdgeLED", coll, [M["led"]], smooth=True)
-    # 细柱支撑
+    # 外侧细柱列：每 30° 一根，以短悬臂托住经过的每一圈坡道
     sp = MeshBuf()
-    for tdeg in np.arange(P.RAMP_T0 + 40, P.RAMP_T1 - 10, 38):
-        a = math.radians(tdeg)
-        zz = float(ramp_z(tdeg)) - 0.26
-        if zz < 1.0:
+    rc = R + hw + 0.16
+    for tdeg in np.arange(0, 360, 30) + 15:
+        dax = (tdeg - P.AXIS_DEG + 180) % 360 - 180
+        if abs(dax) < 16:          # 让开水口
             continue
-        p = np.array([R * math.cos(a), R * math.sin(a)])
-        v, f = lathe([(0, P.FFL), (0.14, P.FFL), (0.14, P.FFL + 0.02), (0.06, P.FFL + 0.03),
-                      (0.06, zz - 0.05), (0.11, zz), (0, zz)], 20, (p[0], p[1], 0))
+        passes = [ph for ph in (tdeg - 720, tdeg - 360, tdeg, tdeg + 360) if P.RAMP_START_DEG + 4 < ph < P.RAMP_END_DEG - 4]
+        if not passes:
+            continue
+        zs_ = [float(P.ramp_z_of_deg(ph)) - 0.26 for ph in passes]
+        a = math.radians(tdeg)
+        dirv = np.array([math.cos(a), math.sin(a)])
+        p = dirv * rc
+        ztop = max(zs_) - 0.02
+        v, f = lathe([(0, P.FFL), (0.16, P.FFL), (0.16, P.FFL + 0.02), (0.065, P.FFL + 0.04),
+                      (0.065, ztop), (0, ztop)], 20, (p[0], p[1], 0))
         sp.add(v, f)
-    sp.build("Ramp_Supports", coll, [M["metal"]], smooth=True)
+        for zz in zs_:
+            q0 = np.r_[p, zz - 0.05]; q1 = np.r_[dirv * (R + 0.2), zz - 0.05]
+            v, f = oriented_box(q0, q1, 0.09, 0.14, (0, 0, 1))
+            sp.add(v, f)
+    sp.build("Ramp_Colonnade", coll, [M["metal"]], smooth=True)
+    return coll
+
+
+def build_core(M, parent):
+    """电梯筒：贯通首层、屋面平台与二层观景厅，直抵次屋顶——竖向交通与次屋顶的主要支承。"""
+    coll = collection("Structure_LiftCore", parent)
+    cx, cy = P.CORE_C
+    zt = float(P.ROOF_B.underside(np.array([cx]), np.array([cy]))[0]) + 0.05
+    v, f = lathe([(0, P.FFL - 0.01), (P.CORE_R, P.FFL - 0.01), (P.CORE_R, zt), (0, zt)], 72, (cx, cy, 0))
+    mesh_object("LiftCore_Shaft", v, f, coll, [M["wall"]], smooth=True)
+    # 两层电梯门：朝庭院一侧的古铜门板
+    face = math.atan2(-cy, -cx)
+    doors = MeshBuf()
+    for z0 in (P.FFL, P.DECK):
+        for k in range(2):
+            a0 = face + (k - 0.5) * 0.46 - 0.23
+            ang = np.linspace(a0, a0 + 0.44, 10)
+            pts = np.stack([cx + (P.CORE_R + 0.012) * np.cos(ang), cy + (P.CORE_R + 0.012) * np.sin(ang)], 1)
+            nn = np.stack([np.cos(ang), np.sin(ang)], 1)
+            v, f, uv = band(pts, z0, z0 + 2.35, 0.0, 0.01, nn, closed=False)
+            doors.add(v, f)
+    doors.build("LiftCore_Doors", coll, [M["bronze_satin"]], smooth=True)
+    return coll
+
+
+def build_supports(M, parent):
+    """西翼尖下的 Y 形斜柱（立于水中石墩），与 C 东翼尖下的水中石墩。"""
+    coll = collection("Structure_WingSupports", parent)
+    stone, steel = MeshBuf(), MeshBuf()
+    bx, by = P.YCOL_BASE
+    v, f = lathe([(0, -1.7), (1.05, -1.7), (1.05, P.FFL - 0.35), (0.95, P.FFL - 0.2), (0.85, P.FFL), (0, P.FFL)], 64, (bx, by, 0))
+    stone.add(v, f)
+    node = np.array([bx, by, P.FFL + 0.55])
+    v, f = lathe([(0, P.FFL), (0.42, P.FFL), (0.42, P.FFL + 0.06), (0.26, P.FFL + 0.12), (0.22, P.FFL + 0.6), (0, P.FFL + 0.6)],
+                 40, (bx, by, 0))
+    steel.add(v, f)
+    for r, a in P.YCOL_TOPS:
+        tx, ty = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
+        tz = float(P.ROOF_A.underside(np.array([tx]), np.array([ty]))[0])
+        top = np.array([tx, ty, tz])
+        k = np.linspace(0, 1, 24)
+        path = node[None] * (1 - k[:, None]) + top[None] * k[:, None]
+        rad = 0.22 - 0.07 * k + 0.17 * np.clip((k - 0.86) / 0.14, 0, 1) ** 2.2
+        v, f, uv = tube(path, rad, 20)
+        steel.add(v, f)
+        v, f = lathe([(0, tz - 0.02), (0.44, tz - 0.02), (0.44, tz + 0.1), (0, tz + 0.1)], 32, (tx, ty, 0))
+        steel.add(v, f)
+    # C 东翼尖的水中石墩与古铜支座
+    px, py = P.C_PIER
+    pz = float(P.ROOF_C.underside(np.array([px]), np.array([py]))[0])
+    v, f = lathe([(0, -1.7), (0.62, -1.7), (0.62, pz - 0.45), (0.5, pz - 0.3), (0, pz - 0.3)], 48, (px, py, 0))
+    stone.add(v, f)
+    v, f = lathe([(0, pz - 0.3), (0.34, pz - 0.3), (0.26, pz - 0.12), (0.4, pz - 0.05), (0.4, pz + 0.05), (0, pz + 0.05)],
+                 40, (px, py, 0))
+    steel.add(v, f)
+    stone.build("WingSupports_StonePiers", coll, [M["stone_tidal"]], smooth=True)
+    steel.build("WingSupports_SteelStruts", coll, [M["metal"]], smooth=True)
     return coll
 
 
@@ -596,9 +872,8 @@ def build_ramp(M, parent):
 def build_spiral_stair(M, parent):
     coll = collection("Hall_SpiralStair", parent)
     cx, cy = P.STAIR_C
-    _, soff = P.ROOF_A.surfaces(np.array([cx]), np.array([cy]))
-    soff = float(soff[0])
-    pz = min(P.STAIR_PLATFORM_Z, soff - P.RIB_DEPTH - 2.7)
+    under = float(P.ROOF_A.underside(np.array([cx]), np.array([cy]))[0])
+    pz = min(P.STAIR_PLATFORM_Z + P.FFL, under - 2.6)
     R0, R1 = 1.55, 2.55
     # 平台
     plat = MeshBuf()
@@ -613,7 +888,7 @@ def build_spiral_stair(M, parent):
     for k in range(4):
         a = math.radians(45 + 90 * k)
         x, y = cx + 1.3 * math.cos(a), cy + 1.3 * math.sin(a)
-        _, sz = P.ROOF_A.surfaces(np.array([x]), np.array([y]))
+        sz = P.ROOF_A.underside(np.array([x]), np.array([y]))
         v, f, _ = tube([[x, y, pz], [x, y, float(sz[0])]], 0.011, 8)
         rods.add(v, f)
     rods.build("Stair_HangerRods", coll, [M["metal"]], smooth=True)
@@ -651,8 +926,7 @@ def build_spiral_stair(M, parent):
     stringer.build("Stair_Stringers", coll, [M["wall"]], smooth=True)
     g, m = MeshBuf(), MeshBuf()
     pts = np.stack([cx + (R1 - 0.03) * np.cos(angs), cy + (R1 - 0.03) * np.sin(angs)], 1)
-    zf = lambda q: P.FFL + ((np.arctan2(q[:, 1] - cy, q[:, 0] - cx) - a_start) % (2 * np.pi)) / sweep_ang * rise
-    balustrade(g, m, pts[3:-3], 0, height=1.0, panel=1.1, zfun=zf)
+    balustrade(g, m, pts[3:-3], 0, height=1.0, panel=1.1, zs=zz[3:-3])
     # 平台栏板（留出楼梯到达口）
     a_end = a_start + sweep_ang
     pa = np.linspace(a_end + 0.55, a_end + 2 * np.pi - 0.15, 120)

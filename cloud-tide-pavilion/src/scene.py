@@ -6,8 +6,8 @@ import bpy
 import plan as P
 from bl import collection
 
-SUN_AZ = 258.0      # 方位角（自北顺时针）
-SUN_EL = 4.0        # 高度角
+SUN_AZ = P.SOLSTICE_SUNSET_AZ   # 冬至日落方位（北纬 30°）
+SUN_EL = 4.0                    # 落日前约 20 分钟
 
 
 def setup_world(sun_az=SUN_AZ, sun_el=SUN_EL, strength=0.55, clouds=True):
@@ -28,8 +28,8 @@ def setup_world(sun_az=SUN_AZ, sun_el=SUN_EL, strength=0.55, clouds=True):
     sky.sun_intensity = 0.9
     sky.altitude = 20.0
     sky.air_density = 1.0
-    sky.aerosol_density = 2.2
-    sky.ozone_density = 1.0
+    sky.aerosol_density = 0.6
+    sky.ozone_density = 2.0
     col = sky.outputs[0]
     if clouds:
         # 高空薄云：将视线方向投影到云层平面，噪声拉伸成丝缕
@@ -119,19 +119,23 @@ def setup_lights(parent):
         X, Y = np.meshgrid(xs, ys)
         inside = shapely.contains_xy(poly.buffer(-1.4), X, Y)
         pts = np.stack([X[inside], Y[inside]], 1)
-        _, soff = roof.surfaces(pts[:, 0], pts[:, 1])
-        for k, (p, zs) in enumerate(zip(pts, soff)):
-            area(f"Light_{nm}_Ceiling_{k:02d}", (p[0], p[1], zs - P.RIB_DEPTH - 0.3), 1.6, pw)
-    # 庭院树的上照灯
+        und = roof.underside(pts[:, 0], pts[:, 1])
+        for k, (p, zu) in enumerate(zip(pts, und)):
+            area(f"Light_{nm}_Ceiling_{k:02d}", (p[0], p[1], zu - 0.3), 1.6, pw)
+    # 树岛上照灯
     tx, ty = P.TREE_POS
+    top = P.FFL + 0.45
     for k in range(3):
         a = 2 * math.pi * k / 3 + 0.4
-        x, y = tx + 1.3 * math.cos(a), ty + 1.3 * math.sin(a)
-        spot(f"Light_Tree_Uplight_{k}", (x, y, P.FFL + 0.5), (math.radians(-12 * math.sin(a)), math.radians(12 * math.cos(a)), 0),
-             420, angle=55)
-    # 雕塑底部光
+        x, y = tx + 1.15 * math.cos(a), ty + 1.15 * math.sin(a)
+        o = spot(f"Light_Tree_Uplight_{k}", (x, y, top), (0, 0, 0), 420, angle=55)
+        aim(o, (x, y, top), (tx, ty, top + 5.0))
+    # 雕塑侧光（装在第一级台阶上）
     sx, sy = P.SCULPT_POS
-    spot("Light_Sculpture_Up", (sx + 0.8, sy - 0.9, P.FFL + 0.2), (math.radians(30), math.radians(25), 0), 140, angle=50)
+    a = math.atan2(sy, sx)
+    src = (4.9 * math.cos(a), 4.9 * math.sin(a), P.BASIN_STEPS[0][2] + 0.12)
+    o = spot("Light_Sculpture_Accent", src, (0, 0, 0), 220, angle=40)
+    aim(o, src, (sx, sy, 0.7))
     return coll
 
 
@@ -171,27 +175,41 @@ def setup_render(samples=128, res=(1600, 900), denoise=True):
     sc.render.image_settings.color_mode = "RGB"
 
 
+def _axis(r, z):
+    p = P.AXIS * r
+    return (float(p[0]), float(p[1]), z)
+
+
+def _ramp_cam(phi):
+    a = math.radians(phi)
+    r = P.RAMP_R - 0.35
+    return (r * math.cos(a), r * math.sin(a), float(P.ramp_z_of_deg(phi)) + 1.6)
+
+
+_mc = P.MOON_C
 CAMERAS = {
-    # 名称: (位置, 目标点, 焦距mm, 曝光)
-    "hero":     ((14.0, -44.0, 2.3), (-4.0, 0.0, 5.0), 24, 0.0),
-    "hero2":    ((40.0, -16.0, 2.2), (0.0, 1.5, 5.4), 24, 0.0),
-    "aerial":   ((40.0, -46.0, 36.0), (0.0, -1.0, 3.0), 30, 0.0),
-    "rear":     ((-50.0, -12.0, 2.4), (0.0, 3.0, 5.4), 30, 0.0),
-    "court":    ((0.2, -4.6, 1.6), (0.9, 6.0, 6.2), 15, 0.5),
-    "interior": ((10.5, 4.25, 1.55), (3.9, 10.8, 2.3), 18, 0.6),
-    "terrace":  ((-6.6, 16.6, P.DECK + 1.6), (-22.0, 2.0, P.DECK + 0.3), 22, 0.2),
-    "moon":     ((0.4, 12.0, P.DECK + 1.55), (-9.3, 8.6, P.DECK + 1.9), 22, 0.4),
-    "stair":    ((-6.6, 6.0, 1.5), (-12.6, 2.4, 2.4), 18, 0.5),
-    "detail":   ((11.6, -19.6, 1.5), (8.2, -14.4, 3.15), 42, 0.2),
-    "entry":    ((3.2, -25.0, 1.6), (-0.4, -14.0, 2.4), 24, 0.3),
-    "dusk":     ((26.0, -40.0, 2.4), (-3.0, 0.0, 5.2), 24, 1.6),
+    # 名称: (位置, 目标点, 焦距mm, 曝光, 潮位)
+    "hero":      ((14.0, -44.0, 2.6), (-4.0, 0.0, 5.2), 24, 0.0, "high"),
+    "aerial":    ((30.0, -38.0, 46.0), (-2.0, -1.0, 1.0), 30, 0.0, "high"),
+    "axis":      (_axis(-5.0, P.BASIN_STEPS[0][2] + 1.6), _axis(40.0, 2.6), 22, 0.2, "high"),
+    "axis_out":  (_axis(46.0, 2.2), (0.0, 0.0, 4.2), 30, 0.0, "high"),
+    "court_ht":  ((3.5, -12.5, 17.5), (-0.8, 0.4, -0.3), 26, 0.2, "high"),
+    "court_lt":  ((3.5, -12.5, 17.5), (-0.8, 0.4, -0.3), 26, 0.2, "low"),
+    "interior":  ((10.5, 4.25, P.FFL + 1.55), (3.9, 10.8, P.FFL + 2.0), 18, 0.6, "high"),
+    "moon":      ((float((_mc - P.AXIS * 8.6)[0]), float((_mc - P.AXIS * 8.6)[1]), P.DECK + 1.6),
+                  (float(_mc[0]), float(_mc[1]), P.DECK + 1.95), 26, 0.3, "high"),
+    "terrace":   ((10.6, 6.2, P.DECK + 1.6), (-9.0, 7.9, P.DECK + 1.6), 20, 0.2, "high"),
+    "stair":     ((-6.6, 6.0, P.FFL + 1.5), (-12.6, 2.4, P.FFL + 2.0), 18, 0.5, "high"),
+    "detail":    ((11.6, -19.6, P.FFL + 1.1), (8.2, -14.4, 3.6), 42, 0.2, "high"),
+    "structure": ((-10.3, -9.2, P.FFL + 1.6), (-13.0, -8.2, 7.2), 24, 0.3, "high"),
+    "dusk":      ((26.0, -40.0, 2.6), (-3.0, 0.0, 5.4), 24, 1.6, "high"),
 }
 
 
 def add_cameras(parent):
     coll = collection("Cameras", parent)
     out = {}
-    for name, (loc, tgt, lens, ev) in CAMERAS.items():
+    for name, (loc, tgt, lens, ev, tide) in CAMERAS.items():
         cam = bpy.data.cameras.new(f"Cam_{name}")
         cam.lens = lens
         cam.sensor_width = 36
@@ -201,6 +219,7 @@ def add_cameras(parent):
         coll.objects.link(o)
         aim(o, loc, tgt)
         o["exposure"] = ev
+        o["tide"] = tide
         out[name] = o
     return out
 

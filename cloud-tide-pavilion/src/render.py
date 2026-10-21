@@ -5,10 +5,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
+import plan as P  # noqa: E402
 
 RES = {
     "hero": (2400, 1000), "hero2": (2400, 1000), "aerial": (1600, 1000), "rear": (1600, 1000), "court": (1600, 1000),
     "interior": (1600, 1000), "terrace": (1600, 1000), "detail": (1600, 1000), "moon": (1600, 1000), "stair": (1600, 1000), "dusk": (2400, 1000), "entry": (1600, 1000),
+    "axis": (1600, 1000), "axis_out": (1600, 1000), "court_ht": (1600, 1000), "court_lt": (1600, 1000), "structure": (1600, 1000),
 }
 
 
@@ -49,11 +51,14 @@ def main():
     for v in views:
         cam = bpy.data.objects[f"Cam_{v}"]
         sc.camera = cam
-        sc.view_settings.exposure = float(cam.get("exposure", 0.0)) + float(opts.get("ev", 0))
+        sc.view_settings.exposure = float(cam.get("exposure", 0.0)) + float(opts.get("ev", -0.2))
         w, h = RES.get(v, (1600, 1000))
         sc.render.resolution_x, sc.render.resolution_y = int(w * scale), int(h * scale)
         sc.render.filepath = os.path.join(outdir, f"{v}.png")
         set_time(sc, dusk=(v == "dusk"))
+        water = bpy.data.objects.get("Water_Surface")
+        if water:
+            water.location.z = P.LOW_TIDE if cam.get("tide") == "low" else P.HIGH_TIDE
         t = time.time()
         bpy.ops.render.render(write_still=True)
         print(f"rendered {v} in {time.time() - t:.1f}s", flush=True)

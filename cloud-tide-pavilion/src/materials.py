@@ -319,6 +319,44 @@ def painting(name, seed=0.0):
     return m
 
 
+def tidal_stone(name="M_Stone_Tidal", color=(0.70, 0.675, 0.63, 1), tide=0.0):
+    """潮池石材：设计高潮位以下颜色加深、表面湿润，近池底泛出极淡的青褐色——落潮后留下潮痕。"""
+    m = _new(name); t = NT(m)
+    geo = t.n("ShaderNodeNewGeometry", (-1200, 200))
+    sep = t.n("ShaderNodeSeparateXYZ", (-1000, 200))
+    t.link(geo.outputs["Position"], sep.inputs[0])
+    wet = t.n("ShaderNodeMapRange", (-800, 200), **{"From Min": tide + 0.06, "From Max": tide - 0.04,
+                                                   "To Min": 0.0, "To Max": 1.0})
+    t.link(sep.outputs[2], wet.inputs["Value"])
+    deep = t.n("ShaderNodeMapRange", (-800, -50), **{"From Min": tide - 0.25, "From Max": tide - 0.75,
+                                                    "To Min": 0.0, "To Max": 1.0})
+    t.link(sep.outputs[2], deep.inputs["Value"])
+    tc = t.n("ShaderNodeTexCoord", (-1200, -300))
+    nz = t.n("ShaderNodeTexNoise", (-900, -300), **{"Scale": 2.5, "Detail": 8.0, "Roughness": 0.6})
+    t.link(tc.outputs["Object"], nz.inputs["Vector"])
+    ramp = t.n("ShaderNodeValToRGB", (-650, -300))
+    ramp.color_ramp.elements[0].color = tuple(c * 0.94 for c in color[:3]) + (1,)
+    ramp.color_ramp.elements[1].color = tuple(min(1, c * 1.04) for c in color[:3]) + (1,)
+    t.link(nz.outputs["Fac"], ramp.inputs["Fac"])
+    dark = t.n("ShaderNodeMix", (-350, 0), data_type="RGBA")
+    t.link(wet.outputs[0], dark.inputs["Factor"])
+    t.link(ramp.outputs[0], dark.inputs["A"])
+    dark.inputs["B"].default_value = (0.36, 0.34, 0.30, 1)
+    algae = t.n("ShaderNodeMix", (-120, 0), data_type="RGBA")
+    t.link(t.math("MULTIPLY", deep.outputs[0], 0.55), algae.inputs["Factor"])
+    t.link(dark.outputs["Result"], algae.inputs["A"])
+    algae.inputs["B"].default_value = (0.20, 0.24, 0.17, 1)
+    b = t.bsdf(**{"Specular IOR Level": 0.5})
+    t.link(algae.outputs["Result"], b.inputs["Base Color"])
+    t.link(t.math("SUBTRACT", 0.6, t.math("MULTIPLY", wet.outputs[0], 0.38)), b.inputs["Roughness"])
+    bump = t.n("ShaderNodeBump", (250, -300), **{"Strength": 0.15, "Distance": 0.004})
+    t.link(nz.outputs["Fac"], bump.inputs["Height"])
+    t.link(bump.outputs[0], b.inputs["Normal"])
+    t.link(b.outputs[0], t.out.inputs[0])
+    m.diffuse_color = color
+    return m
+
+
 def build_library():
     L = {}
     L["roof"] = ivory_mineral("M_RoofSkin_Ivory", (0.86, 0.835, 0.79, 1), rough=0.48)
@@ -350,6 +388,12 @@ def build_library():
     L["fabric"] = flat("M_Fabric_Cream", (0.86, 0.83, 0.77, 1), rough=0.95, spec=0.2)
     L["oak"] = wood_rib("M_Wood_Furniture")
     L["plinth"] = flat("M_Plinth_Shadow", (0.13, 0.13, 0.13, 1), rough=0.8)
+    L["stone_tidal"] = tidal_stone()
+    L["bronze_satin"] = flat("M_Bronze_Satin", (0.42, 0.33, 0.24, 1), rough=0.38, metallic=1.0)
+    L["people"] = [flat(f"M_People_{k}", c, rough=0.8, spec=0.3) for k, c in enumerate((
+        (0.08, 0.09, 0.11, 1), (0.72, 0.68, 0.60, 1), (0.30, 0.32, 0.36, 1), (0.85, 0.84, 0.80, 1),
+        (0.45, 0.30, 0.22, 1), (0.16, 0.22, 0.30, 1)))]
+    L["skin"] = flat("M_People_Skin", (0.62, 0.46, 0.36, 1), rough=0.6, spec=0.4)
     L["art"] = [painting(f"M_Art_{i}", seed=i * 3.7) for i in range(4)]
     L["frame"] = flat("M_ArtFrame", (0.10, 0.09, 0.08, 1), rough=0.4)
     return L

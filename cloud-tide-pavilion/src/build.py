@@ -47,8 +47,27 @@ def end_caps(which):
     return f
 
 
-e1_solid = end_caps([(0, 30)])
-e2_solid = end_caps([(220, 245), (305, 330)])
+e3_solid = end_caps([(40, 66)])          # 二层观景厅东端弧墙：次屋顶的支承之一
+
+
+def e1_solid(mp, nrm):
+    """一层展廊外侧整体为实墙（美术馆避免直射光），月牙两端为端墙；庭院一侧保持玻璃。"""
+    th = angle_deg(mp)
+    o = outer_side(mp, nrm)
+    # 西端（螺旋楼梯所在的高厅）保持玻璃，让楼梯从外部可见
+    return ranges_from_mask(((o > 0.35) & (th < 148)) | ((np.abs(o) <= 0.35) & (th < 30)))
+
+
+def e1_windows(mp, nrm):
+    """实墙上的四处框景窗，各宽两跨，朝向水面的不同方向。"""
+    th = angle_deg(mp)
+    o = outer_side(mp, nrm)
+    out = []
+    for target in (32, 66, 100, 132):
+        cand = np.where(o > 0.6)[0]
+        i = int(cand[np.argmin(np.abs(th[cand] - target))])
+        out.append((i, i + 2))
+    return out
 
 
 def e1_doors(mp, nrm):
@@ -92,17 +111,22 @@ def main(out_path, lite=False):
     print("materials", time.time() - t0)
 
     for roof in P.ROOFS:
-        A.build_roof(roof, M, roofs)
+        A.build_roof(roof, M, roofs, skylights=P.SKYLIGHTS if roof is P.ROOF_A else ())
         print("roof", roof.name, time.time() - t0)
 
-    e1 = A.build_envelope("Envelope_E1_Gallery", P.E1, P.ROOF_A, P.FFL, M, env, solid=e1_solid, doors=e1_doors)
-    e2 = A.build_envelope("Envelope_E2_Lobby", P.E2, P.ROOF_C, P.FFL, M, env, solid=e2_solid, doors=e2_doors)
-    e3 = A.build_envelope("Envelope_E3_Belvedere", P.E3, P.ROOF_B, P.DECK, M, env, column_every=None)
+    e1 = A.build_envelope("Envelope_E1_Gallery", P.E1, P.ROOF_A, P.FFL, M, env, solid=e1_solid, doors=e1_doors,
+                          windows=e1_windows, column_side="inner")
+    e2 = A.build_envelope("Envelope_E2_Lobby", P.E2, P.ROOF_C, P.FFL, M, env, doors=e2_doors)
+    e3 = A.build_envelope("Envelope_E3_Belvedere", P.E3, P.ROOF_B, P.DECK, M, env, solid=e3_solid, column_every=None)
     print("envelopes", time.time() - t0)
 
-    A.build_plinth(P.PLINTH_ALL, P.FFL, M, base, name="Plinth_And_Bridge")
+    struct = collection("Structure", arch)
+    A.build_plinth(P.PLINTH_CUT, P.FFL, M, base, name="Plinth_And_Bridge", cut=P.WATER_CUT)
+    A.build_tidal_basin(M, base)
     A.build_deck(M, base)
     A.build_moon_gate(M, base)
+    A.build_core(M, struct)
+    A.build_supports(M, struct)
     A.build_ramp(M, circ)
     A.build_spiral_stair(M, circ)
     print("base/circ", time.time() - t0)
@@ -111,6 +135,7 @@ def main(out_path, lite=False):
     S.build_courtyard(M, site)
     S.build_interior(M, site, e1, e2, e3)
     S.build_deck_furniture(M, site)
+    S.build_people(M, site)
     if not lite:
         S.build_landscape(M, site)
     else:
