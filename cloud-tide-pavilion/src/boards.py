@@ -118,7 +118,7 @@ def trimmed(path, pad=30):
 def board1(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 02  概念与形象")
+    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 03  概念与形象")
     top = 290
     left_w = 1060
     x0 = M + left_w + 70
@@ -173,7 +173,7 @@ def board1(R, D, out):
 def board2(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 02  技术与细部")
+    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 03  技术与细部")
     top = 290
     # 第一行：总平面 + 长剖面
     row1_h = 1180
@@ -201,8 +201,8 @@ def board2(R, D, out):
     xt = M + 4 * (pw + G) + 10
     yy = y3 + 4
     blocks = [
-        ("结构", "主屋顶由展廊外墙、内侧柱列与电梯筒共同支承；西翼尖由水中石墩上的 Y 形斜柱托起。"
-                "次屋顶落在电梯筒、月洞墙与观景厅东端弧墙上。檐下胶合木径向梁由檐口 100 mm 加深到支座处 340 mm。"),
+        ("结构", "胶合木主梁约 1.5 m 一根，落在柱顶钢环梁上；柱、承重外墙、电梯筒、Y 形斜柱与水中石墩"
+                "共同支承三片屋面，屋面任一点距最近支承不超过 5.8 m。次屋顶的柱与一层柱上下对齐。详见第三张展板。"),
         ("光与热", "展廊朝外为实墙，西晒与直射光不进展厅；屋面光缝提供漫射天光；深挑檐为庭院一侧的玻璃遮阳。"),
         ("水与韧性", "首层高出设计高潮位 0.85 m；潮池与水口由石材砌筑，可承受日常淹没，潮痕即是材料的记录。"),
         ("无障碍", "坡道 1:12，每升 0.68 m 设 1.5 m 平台；电梯筒连通首层、屋面平台与观景厅。"),
@@ -213,9 +213,130 @@ def board2(R, D, out):
     im.save(out, quality=92)
 
 
+def axo_with_labels(png, w, h, label_w=360, fs=30):
+    """结构轴测图 + 两侧标注。图先裁到内容范围并缩放，标注按锚点高度排开，折线引线连到构件。"""
+    import json
+    raw = Image.open(png).convert("RGBA")
+    labels = json.load(open(png.replace(".png", "_labels.json"), encoding="utf-8"))
+    x0, y0, x1, y1 = raw.split()[3].getbbox()
+    raw = raw.crop((x0, y0, x1, y1))
+    s = min((w - 2 * label_w) / raw.width, h / raw.height)
+    iw, ih = int(raw.width * s), int(raw.height * s)
+    canvas = Image.new("RGBA", (w, h), PAPER + (255,))
+    ox, oy = (w - iw) // 2, (h - ih) // 2
+    canvas.alpha_composite(raw.resize((iw, ih), Image.LANCZOS), (ox, oy))
+    canvas = canvas.convert("RGB")
+    d = ImageDraw.Draw(canvas)
+    f = font(fs)
+    pts = {k: (ox + (x - x0) * s, oy + (y - y0) * s) for k, (x, y) in labels.items()}
+    by_x = sorted(pts, key=lambda k: pts[k][0])
+    half = (len(by_x) + 1) // 2
+    sp, lead = int(fs * 2.1), (60, 57, 52)
+    for side, keys in (("l", by_x[:half]), ("r", by_x[half:])):
+        keys = sorted(keys, key=lambda k: pts[k][1])
+        ty = [pts[k][1] for k in keys]
+        for i in range(1, len(ty)):
+            ty[i] = max(ty[i], ty[i - 1] + sp)
+        ty[-1] = min(ty[-1], h - fs)
+        for i in range(len(ty) - 2, -1, -1):
+            ty[i] = min(ty[i], ty[i + 1] - sp)
+        for k, t in zip(keys, ty):
+            ax_, ay = pts[k]
+            tw = d.textlength(k, font=f)
+            if side == "l":
+                tx, lx, ex = 0, tw + 14, label_w - 10
+            else:
+                tx, lx, ex = w - tw, w - tw - 14, w - label_w + 10
+            d.text((tx, t - fs * 0.62), k, font=f, fill=INK)
+            d.line([(lx, t), (ex, t), (ax_, ay)], fill=lead, width=2, joint="curve")
+            d.ellipse([ax_ - 9, ay - 9, ax_ + 9, ay + 9], fill=PAPER)
+            d.ellipse([ax_ - 6, ay - 6, ax_ + 6, ay + 6], fill=ACCENT)
+    return canvas
+
+
+# 主要构件（与 architecture.py / structure.py 中的尺寸一致）
+MEMBERS = [
+    ("主梁", "胶合木 GL28h，宽 160；高 200（檐口）→ 600 / 520 / 480（A / B / C 支座）"),
+    ("次肋", "木格栅 100 深，间距约 240 mm"),
+    ("柱顶环梁", "钢箱梁 220 宽，梁底与主梁底平"),
+    ("柱", "钢管 φ194×10，外张柱头，顶板 φ500 承于主梁与环梁下"),
+    ("Y 形斜柱", "变截面钢管 φ460 → φ320，铸钢节点，立于 φ2.1 m 石墩"),
+    ("电梯筒", "钢筋混凝土筒 φ2.3 m，由基础贯通至次屋顶"),
+    ("月洞墙 / 展廊外墙", "钢筋混凝土承重墙，外饰矿物质涂层"),
+    ("水中石墩", "花岗岩外包 φ1.24 m，内为钢筋混凝土墩，高出设计高潮位 0.6 m"),
+    ("坡道", "螺旋钢箱梁 260 高，外侧 φ180 钢柱每 30° 一根"),
+    ("基础", "钻孔灌注桩 + 承台，基座为钢筋混凝土箱体"),
+]
+
+
+def board3(R, D, out):
+    import structure as ST
+    im = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(im)
+    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  初步校核", "03 / 03  结构")
+    top = 290
+    left_w = 2560
+    sm = trimmed(f"{D}/support_map.png")
+    row2_h = min(int(left_w * sm.height / sm.width), 1100)
+    y2 = H - M - row2_h
+    row1_h = y2 - G - top
+    im.paste(axo_with_labels(f"{R}/struct_axo.png", left_w, row1_h), (M, top))
+    im.paste(fit(sm, left_w, row2_h), (M, y2))
+    # 右栏：荷载路径 → 支承布置 → 主要构件 → 初步校核
+    x0 = M + left_w + 90
+    tw = W - M - x0
+    y = top + 10
+    d.text((x0, y), "荷载路径", font=font(50), fill=INK); y += 86
+    steps = ["屋面板：轻钢龙骨 + 20 mm GRC 面层",
+             "次肋：100 mm 木格栅，传力给主梁",
+             "主梁：胶合木，约 1.5 m 一根，与幕墙分格对齐；截面由檐口向支座加深",
+             "柱顶环梁：钢箱梁，收集主梁荷载传给柱",
+             "柱 / 承重墙 / 电梯筒 / Y 形斜柱 / 水中石墩",
+             "钻孔灌注桩：基座与石墩之下"]
+    for k, t in enumerate(steps):
+        d.text((x0, y), f"{k + 1}", font=font(32), fill=ACCENT)
+        y = para(d, (x0 + 46, y), t, 30, tw - 46, lh=1.42) + 8
+    y += 34
+    d.text((x0, y), "支承布置", font=font(50), fill=INK); y += 86
+    for t in ["次屋顶的柱立在主屋顶结构层上，与一层内侧柱上下对齐，荷载直落基础。",
+              "主屋顶西翼尖由水中石墩上的 Y 形斜柱托起；低檐东翼尖由两处水中石墩承托，翼尖下不再设基座。",
+              "屋面上任一点到最近支承不超过 5.8 m（左下图），悬挑与跨度都落在胶合木梁的常规范围内。"]:
+        y = para(d, (x0, y), t, 30, tw, lh=1.42) + 12
+    y += 34
+    d.text((x0, y), "主要构件", font=font(50), fill=INK); y += 86
+    for a, b in MEMBERS:
+        d.text((x0, y), a, font=font(28), fill=ACCENT)
+        y = para(d, (x0 + 270, y), b, 28, tw - 270, lh=1.38) + 8
+    # 初步校核：与支承距离图同一行起
+    chk = ST.prelim_checks()
+    yy = max(y + 40, y2)
+    d.text((x0, yy), "初步校核", font=font(50), fill=INK); yy += 80
+    yy = para(d, (x0, yy), "屋面恒载 1.5 / 活载 0.5 kPa；屋面平台恒载 3.0 / 活载 3.5 kPa；分项系数 1.3 / 1.5。"
+              "方案阶段手算，用于确认构件尺度，深化阶段需结构工程师建模复核。", 26, tw, color=MUTED, lh=1.42) + 18
+    names = {"Roof_A_Main": "A 主梁悬挑", "Roof_B_Upper": "B 主梁悬挑", "Roof_C_Low": "C 主梁悬挑"}
+    rows = []
+    for k, v in chk.items():
+        if k in names:
+            rows.append((names[k], f"{v['L']:.1f} m · 梁高 {v['h'] * 1000:.0f}",
+                         f"应力比 {v['util']:.2f} · 挠度 L/{v['ratio']:.0f}"))
+    v = chk["deck_beam"]
+    rows.append(("平台主梁跨中", f"{v['L']:.1f} m · 梁高 {P.ROOF_A.beam_core * 1000:.0f}",
+                 f"应力比 {v['util']:.2f} · 挠度 L/{v['ratio']:.0f}"))
+    v = chk["column"]
+    rows.append(("一层柱 φ194×10", f"轴力 {v['N']:.0f} kN", f"稳定承载 {v['Nb']:.0f} kN · 应力比 {v['util']:.2f}"))
+    f1, f2 = font(30), font(28)
+    for a, b, c in rows:
+        d.text((x0, yy), a, font=f1, fill=ACCENT)
+        d.text((x0 + 300, yy), b, font=f2, fill=INK)
+        d.text((x0 + 300 + 330, yy), c, font=f2, fill=MUTED)
+        yy += 56
+    im.save(out, quality=92)
+
+
 if __name__ == "__main__":
     R, D, O = sys.argv[1], sys.argv[2], sys.argv[3]
     os.makedirs(O, exist_ok=True)
     board1(R, D, os.path.join(O, "board_01.jpg"))
     board2(R, D, os.path.join(O, "board_02.jpg"))
+    board3(R, D, os.path.join(O, "board_03.jpg"))
     print("boards ->", O)

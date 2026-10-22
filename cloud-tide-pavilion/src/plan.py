@@ -14,8 +14,8 @@ from scipy.interpolate import PchipInterpolator
 
 FFL = 0.85          # 首层完成面：高出设计高潮位 0.85 m（风暴增水余量）
 DECK = 6.30         # 二层屋顶平台完成面
-RIB_DEPTH = 0.10    # 檐口处木肋高度（向支座方向加深，见 Crescent.rib_depth）
-RIB_DEPTH_CORE = 0.34
+RIB_DEPTH = 0.10    # 次肋（木格栅）高度
+BEAM_EDGE = 0.20    # 主梁在檐口处的高度（向支座加深，见 Crescent.beam_depth）
 HIGH_TIDE = 0.00    # 设计高潮位
 LOW_TIDE = -0.95    # 设计低潮位（潮差 0.95 m）
 
@@ -75,8 +75,9 @@ class Crescent:
     """
 
     def __init__(self, name, theta_s, theta_e, rin_keys, w_keys, h_keys,
-                 t_core, curl=0.0, crown=0.06, round_r=0.7, flat=None):
+                 t_core, curl=0.0, crown=0.06, round_r=0.7, flat=None, beam_core=0.55):
         self.name = name
+        self.beam_core = beam_core
         self.ts, self.te = theta_s, theta_e
         self.span = theta_e - theta_s
         self.rin = PchipInterpolator(*zip(*rin_keys))
@@ -116,16 +117,16 @@ class Crescent:
         pts = shapely.points(np.stack([np.atleast_1d(x), np.atleast_1d(y)], 1))
         return shapely.distance(self.boundary, pts)
 
-    def rib_depth(self, d):
-        """胶合木径向梁：檐口处 100 mm，向内（支座方向）加深到 340 mm —— 悬挑弯矩越大截面越高。"""
-        return RIB_DEPTH + (RIB_DEPTH_CORE - RIB_DEPTH) * smoothstep(0.3, 5.5, d)
+    def beam_depth(self, d):
+        """胶合木主梁高度：檐口处 200 mm，向支座方向加深到 beam_core —— 悬挑弯矩越大截面越高。"""
+        return BEAM_EDGE + (self.beam_core - BEAM_EDGE) * smoothstep(0.3, 4.5, d)
 
     def underside(self, x, y):
-        """木梁底标高：幕墙收口、柱头、灯具都以此为准。"""
+        """主梁底标高：幕墙收口、环梁、柱头、灯具都以此为准。"""
         x = np.atleast_1d(x); y = np.atleast_1d(y)
         d = self.dist_edge(x, y)
         _, bot = self.surfaces(x, y, d)
-        return bot - self.rib_depth(d)
+        return bot - self.beam_depth(d)
 
     def thickness(self, d):
         return EDGE_T + (self.t_core - EDGE_T) * smoothstep(0.0, 4.5, d) ** 0.85
@@ -160,7 +161,7 @@ ROOF_A = Crescent(
     rin_keys=[(0, 12.8), (0.12, 9.3), (0.28, 8.1), (0.55, 8.0), (0.72, 8.9), (0.86, 12.2), (1, 19.0)],
     w_keys=[(0, 0.0), (0.07, 4.2), (0.25, 9.6), (0.50, 12.2), (0.72, 10.2), (0.88, 5.2), (1, 0.0)],
     h_keys=[(0, 4.95), (0.12, 5.75), (0.22, 5.95), (0.64, 5.95), (0.75, 6.95), (0.88, 8.6), (1, 11.2)],
-    t_core=0.85, curl=1.3, crown=0.05, flat=(0.22, 0.64),
+    t_core=0.85, curl=1.3, crown=0.05, flat=(0.22, 0.64), beam_core=0.60,
 )
 
 ROOF_B = Crescent(
@@ -168,15 +169,15 @@ ROOF_B = Crescent(
     rin_keys=[(0, 14.2), (0.12, 9.2), (0.35, 6.9), (0.65, 6.9), (0.88, 8.7), (1, 11.8)],
     w_keys=[(0, 0.0), (0.10, 3.4), (0.40, 8.4), (0.62, 8.6), (0.90, 3.6), (1, 0.0)],
     h_keys=[(0, 8.55), (0.18, 10.35), (0.5, 10.95), (0.8, 11.3), (1, 12.1)],
-    t_core=0.62, curl=0.45, crown=0.04,
+    t_core=0.62, curl=0.45, crown=0.04, beam_core=0.52,
 )
 
 ROOF_C = Crescent(
     "Roof_C_Low", 188, 398,
     rin_keys=[(0, 10.6), (0.15, 9.5), (0.50, 9.4), (0.72, 10.0), (0.86, 13.4), (1, 19.5)],
     w_keys=[(0, 0.0), (0.08, 3.0), (0.35, 8.0), (0.55, 9.0), (0.80, 6.2), (0.92, 3.0), (1, 0.0)],
-    h_keys=[(0, 5.45), (0.25, 4.45), (0.5, 4.25), (0.66, 4.18), (0.85, 3.45), (1, 2.55)],
-    t_core=0.55, curl=0.35, crown=0.04,
+    h_keys=[(0, 5.55), (0.25, 4.75), (0.5, 4.55), (0.66, 4.45), (0.85, 3.55), (1, 2.6)],
+    t_core=0.55, curl=0.35, crown=0.04, beam_core=0.48,
 )
 
 ROOFS = [ROOF_A, ROOF_B, ROOF_C]
@@ -305,21 +306,10 @@ MOON_HALF = 2.0
 MOON_HOLE_R = 1.42
 # A 西翼尖下的 Y 形斜柱，立于水中石墩
 YCOL_BASE = (15.6 * math.cos(math.radians(222)), 15.6 * math.sin(math.radians(222)))
-YCOL_TOPS = [(15.4, 212.0), (15.8, 232.0)]       # (半径, 角度)
+YCOL_TOPS = [(16.4, 205.0), (16.4, 233.0)]       # (半径, 角度)
 # C 东翼尖轻落于水中石墩
-def _c_pier():
-    """在 C 东翼尖下、基座以外的水面中找石墩位置（尽量靠近翼尖）。"""
-    best = None
-    for a in np.arange(0, 40, 0.5):
-        for r in np.arange(14, 21, 0.1):
-            p = Point(r * math.cos(math.radians(a)), r * math.sin(math.radians(a)))
-            if ROOF_C.poly.buffer(-0.7).contains(p) and PLINTH_ALL.distance(p) > 0.9:
-                if best is None or a > best[0]:
-                    best = (a, p.x, p.y)
-    return (best[1], best[2])
-
-
-C_PIER = None   # 在 PLINTH_ALL 定义后计算
+# C 东翼尖下的两处水中石墩（翼尖轻落其上）
+C_PIERS = [(13.91, -5.62), (17.08, 4.26)]   # 由 structure.py 的支承距离检查选定
 
 # 主屋顶天窗：沿一层展廊外墙内侧的一圈细长光缝，天光顺实墙洗下（避开屋面平台）
 SKYLIGHT_W = 0.7
@@ -361,11 +351,28 @@ def _bridge_poly():
 
 
 BRIDGE = _bridge_poly()
+
+
+def _c_horn_water(min_clear=2.4):
+    """低檐 C 东翼尖下方让出水面：凡净高不足 2.4 m 处不设平台，翼尖低伏于水上。"""
+    minx, miny, maxx, maxy = ROOF_C.poly.bounds
+    step = 0.4
+    X, Y = np.meshgrid(np.arange(minx, maxx, step), np.arange(miny, maxy, step))
+    inside = shapely.contains_xy(ROOF_C.poly, X, Y) & (X > 0)
+    xs, ys = X[inside], Y[inside]
+    low = ROOF_C.underside(xs, ys) - FFL < min_clear
+    cells = [shapely.box(x - step / 2, y - step / 2, x + step / 2, y + step / 2) for x, y in zip(xs[low], ys[low])]
+    zone = shapely.unary_union(cells).buffer(0.9, 32)
+    return zone.difference(E1.buffer(1.0, 64)).difference(Point(0, 0).buffer(11.5, 128))
+
+
+C_HORN_WATER = _c_horn_water()
 # 基座与栈桥合为一体，交接处以 1.2 m 圆角过渡，避免拼缝
-PLINTH_ALL = PLINTH.union(BRIDGE).buffer(1.2, 64).buffer(-1.2, 64)
+PLINTH_ALL = PLINTH.difference(C_HORN_WATER).union(BRIDGE).buffer(1.2, 64).buffer(-1.2, 64)
+if PLINTH_ALL.geom_type != "Polygon":
+    PLINTH_ALL = max(PLINTH_ALL.geoms, key=lambda g: g.area)
 # 去掉潮池与水口后的首层平台
 PLINTH_CUT = PLINTH_ALL.difference(WATER_CUT)
-C_PIER = _c_pier()
 
 # 柱下室内雕塑与螺旋楼梯（一层西厅）
 STAIR_C = (12.3 * math.cos(math.radians(166)), 12.3 * math.sin(math.radians(166)))
@@ -391,7 +398,7 @@ def plot(path):
         x, y = g.exterior.xy
         ax.plot(x, y, "teal", lw=0.8)
     ax.plot([0, AXIS[0] * 40], [0, AXIS[1] * 40], "orange", ls="--")
-    ax.plot(*CORE_C, "ko", ms=10); ax.plot(*MOON_C, "yo", ms=10); ax.plot(*YCOL_BASE, "rs"); ax.plot(*C_PIER, "rs")
+    ax.plot(*CORE_C, "ko", ms=10); ax.plot(*MOON_C, "yo", ms=10); ax.plot(*YCOL_BASE, "rs"); [ax.plot(*q, "rs") for q in C_PIERS]
     ax.plot(*BRIDGE_PATH.T, "k--")
     ax.plot(*TREE_POS, "go", ms=12); ax.plot(*SCULPT_POS, "ks")
     ax.plot(*STAIR_C, "r*", ms=14)

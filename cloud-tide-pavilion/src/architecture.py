@@ -8,6 +8,7 @@ from shapely.geometry import Polygon, Point
 import plan as P
 from plan import ccw, resample_ring
 from bl import collection, mesh_object, MeshBuf, sweep, tube, lathe, oriented_box, frames_along
+from facade import envelope_bays
 
 UP = np.array([0, 0, 1.0])
 
@@ -134,7 +135,7 @@ def build_skylights(roof, holes, M, coll):
         ring = ccw(resample_ring(h.exterior.coords, 0.1))
         d = roof.dist_edge(ring[:, 0], ring[:, 1])
         top, bot = roof.surfaces(ring[:, 0], ring[:, 1], d)
-        under = bot - roof.rib_depth(d)
+        under = bot - roof.beam_depth(d)
         nrm, _ = ring_normals(ring)
         v, f, uv = band(ring, under - 0.01, top + 0.02, 0.0, 0.025, nrm)
         lining.add(v, f)
@@ -145,9 +146,10 @@ def build_skylights(roof, holes, M, coll):
     glass.build(f"{roof.name}_Skylight_Glass", coll, [M["glass"]], smooth=False)
 
 
-def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
-    """檐下胶合木径向梁：以庭院中心为极点排布，沿屋面底部曲率连续；截面高度由檐口 100 mm
-    向支座方向加深到 340 mm（悬挑弯矩越大截面越高），端部统一收于阴影缝内线。"""
+def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=(), primary_every=6):
+    """檐下木构：以庭院中心为极点径向排布。每 6 根中 1 根为胶合木主梁（宽 160 mm，
+    高度由檐口 200 mm 向支座加深到 beam_core），其余为 100 mm 次肋（木格栅）；
+    全部沿屋面底部曲率连续，端部统一收于阴影缝内线。"""
     inset = roof.poly.buffer(-(P.REVEAL + 0.04), 64)
     for h in skylights:
         inset = inset.difference(h.buffer(0.06, 16))
@@ -167,6 +169,7 @@ def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
         for a, b in zip(starts, ends):
             runs.append((th, rs[a], rs[b], a > 0, True))
     runs = np.array([(r[0], r[1], r[2]) for r in runs])
+    th_index = {round(t, 9): i for i, t in enumerate(ths)}
     # 端点二分细化，确保收口线整齐
     def refine(th, r_in, r_out):
         lo, hi = r_out.copy(), r_in.copy()   # lo 在外（不含），hi 在内（含）
@@ -182,6 +185,7 @@ def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
     th, r0, r1 = th[keep], r0[keep], r1[keep]
 
     buf_v, buf_f, buf_uv = [], [], []
+    beams = MeshBuf()
     off = 0
     allp = []
     meta = []
@@ -193,7 +197,7 @@ def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
     P2 = np.vstack(allp)
     d_all = roof.dist_edge(P2[:, 0], P2[:, 1])
     _, zb_all = roof.surfaces(P2[:, 0], P2[:, 1], d_all)
-    dep_all = roof.rib_depth(d_all)
+    dep_all = roof.beam_depth(d_all)
     idx = 0
     rng = np.random.default_rng(7)
     for (t, r) in meta:
@@ -201,8 +205,13 @@ def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
         zb = zb_all[idx: idx + m]; dep = dep_all[idx: idx + m]; idx += m
         e = np.array([-math.sin(t), math.cos(t)])
         c = np.stack([r * math.cos(t), r * math.sin(t)], 1)
-        w = np.clip(0.045 + 0.16 * r * dth, 0.05, 0.11)
-        z_up = zb + 0.03; z_dn = zb - dep
+        primary = th_index.get(round(t, 9), 1) % primary_every == 0
+        if primary:
+            w = np.full(m, 0.16)
+            z_up = zb + 0.03; z_dn = zb - dep
+        else:
+            w = np.clip(0.045 + 0.16 * r * dth, 0.05, 0.11)
+            z_up = zb + 0.03; z_dn = zb - P.RIB_DEPTH
         corners = [(-0.5, z_dn), (0.5, z_dn), (0.5, z_up), (-0.5, z_up)]
         V = np.zeros((m, 4, 3))
         for q, (s, z) in enumerate(corners):
@@ -218,31 +227,24 @@ def build_ribs(roof, M, coll, spacing=0.24, r_ref=14.0, skylights=()):
         F.append([off + (m - 1) * 4 + q for q in range(4)])
         u0 = rng.random() * 10
         uv = np.stack([np.repeat(r + u0, 4), np.tile([0, .3, .6, .9], m) + rng.random()], 1)
+        if primary:
+            beams.add(V.reshape(-1, 3), [[i - off for i in f] for f in F], uv=uv)
+            continue
         buf_v.append(V.reshape(-1, 3)); buf_f.extend(F); buf_uv.append(uv)
         off += 4 * m
     mesh_object(f"{roof.name}_SoffitRibs", np.vstack(buf_v), buf_f, coll, [M["wood"]], smooth=False,
                 uv=np.vstack(buf_uv))
+    beams.build(f"{roof.name}_PrimaryBeams_Glulam", coll, [M["wood"]], smooth=False)
 
 
 # =================================================================== 幕墙
-def envelope_ring(poly, step=0.04):
-    return ccw(resample_ring(poly.exterior.coords, step))
-
-
-def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), doors=(), column_every=3,
-                   column_skip=(), moon=None, windows=(), column_side="outer"):
+def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), doors=(), columns=None,
+                   moon=None, windows=()):
     """幕墙：等宽分段，竖梃与室内柱位对应；顶部金属收口带封至木梁底。
     solid: [(i0,i1)] 以竖梃编号表示的实墙段；windows: 实墙中的框景窗 [(i0,i1)]；doors: [bay 编号]。"""
     coll = collection(name, parent)
-    dense = envelope_ring(poly)
-    seg = np.linalg.norm(np.roll(dense, -1, 0) - dense, axis=1)
-    s = np.concatenate([[0], np.cumsum(seg)])
-    L = s[-1]
-    n = max(6, int(round(L / bay)))
-    sm = np.linspace(0, L, n, endpoint=False)
-    closed = np.vstack([dense, dense[:1]])
-    mp = np.stack([np.interp(sm, s, closed[:, 0]), np.interp(sm, s, closed[:, 1])], 1)
-    nrm, tan = ring_normals(mp)
+    dense, s, L, sm, mp, nrm = envelope_bays(poly, bay)
+    n = len(mp)
     z_head = roof.underside(mp[:, 0], mp[:, 1]) - 0.04
     if callable(solid):
         solid = solid(mp, nrm)
@@ -366,25 +368,11 @@ def build_envelope(name, poly, roof, floor_z, M, parent, bay=1.5, solid=(), door
     if wall.v:
         wall.build(f"{name}_SolidWall", coll, [M["wall"]], smooth=True)
     led.build(f"{name}_CoveLED", coll, [M["led_soft"]], smooth=False)
-    # 柱：与竖梃对应，退入室内
-    cols = MeshBuf()
-    col_pts = []
-    radial_out = (nrm * (mp / np.linalg.norm(mp, axis=1, keepdims=True))).sum(1)
-    for i in (range(0, n, column_every) if column_every else []):
-        if is_solid(i) or i in column_skip:
-            continue
-        if column_side == "outer" and radial_out[i] < 0.35:
-            continue
-        if column_side == "inner" and radial_out[i] > -0.35:
-            continue
-        c = mp[i] - nrm[i] * 0.85
-        if not poly.buffer(-0.4).contains(Point(*c)):
-            continue
-        col_pts.append(c)
-    if col_pts:
-        cp = np.array(col_pts)
-        cund = roof.underside(cp[:, 0], cp[:, 1])
-        for c, zu in zip(cp, cund):
+    # 柱：位置由 structure.py 统一给出（与竖梃对应，退入室内 0.85 m）
+    if columns is not None and len(columns):
+        cols = MeshBuf()
+        cp = np.asarray(columns)
+        for c, zu in zip(cp, roof.underside(cp[:, 0], cp[:, 1])):
             add_column(cols, c, floor_z, zu)
         cols.build(f"{name}_Columns", coll, [M["metal"]], smooth=True)
     return coll, mp, nrm, z_head
@@ -742,7 +730,8 @@ def build_deck(M, parent):
 # =================================================================== 坡道
 def build_ramp(M, parent):
     """绕潮池上升的无障碍坡道：坡度 1:12，每升约 0.68 m 设 1.5 m 休息平台，共约 1.96 圈；
-    上下两圈净高约 2.5 m。外侧一圈细柱以短悬臂托住各圈坡道。"""
+    上下两圈净高约 2.5 m。坡道为螺旋钢箱梁，外侧一圈 φ180 钢柱（每 30°，约 3.3 m）
+    以 120×220 钢悬臂托住经过的每一圈。"""
     coll = collection("Courtyard_Ramp", parent)
     R, W = P.RAMP_R, P.RAMP_W
     phi = np.arange(P.RAMP_START_DEG, P.RAMP_END_DEG + 0.01, 0.5)
@@ -800,14 +789,14 @@ def build_ramp(M, parent):
         dirv = np.array([math.cos(a), math.sin(a)])
         p = dirv * rc
         ztop = max(zs_) - 0.02
-        v, f = lathe([(0, P.FFL), (0.16, P.FFL), (0.16, P.FFL + 0.02), (0.065, P.FFL + 0.04),
-                      (0.065, ztop), (0, ztop)], 20, (p[0], p[1], 0))
+        v, f = lathe([(0, P.FFL), (0.2, P.FFL), (0.2, P.FFL + 0.025), (0.09, P.FFL + 0.05),
+                      (0.09, ztop), (0, ztop)], 24, (p[0], p[1], 0))
         sp.add(v, f)
         for zz in zs_:
-            q0 = np.r_[p, zz - 0.05]; q1 = np.r_[dirv * (R + 0.2), zz - 0.05]
-            v, f = oriented_box(q0, q1, 0.09, 0.14, (0, 0, 1))
+            q0 = np.r_[p + dirv * 0.05, zz - 0.11]; q1 = np.r_[dirv * (R - 0.35), zz - 0.11]
+            v, f = oriented_box(q0, q1, 0.12, 0.22, (0, 0, 1))
             sp.add(v, f)
-    sp.build("Ramp_Colonnade", coll, [M["metal"]], smooth=True)
+    sp.build("Ramp_Colonnade", coll, [M["metal"]], smooth=False)
     return coll
 
 
@@ -833,10 +822,17 @@ def build_core(M, parent):
     return coll
 
 
+def _stone_pier(buf, p, z_top, r=0.62):
+    v, f = lathe([(0, -1.7), (r, -1.7), (r, z_top - 0.08), (r - 0.06, z_top), (0, z_top)], 48, (p[0], p[1], 0))
+    buf.add(v, f)
+
+
 def build_supports(M, parent):
-    """西翼尖下的 Y 形斜柱（立于水中石墩），与 C 东翼尖下的水中石墩。"""
-    coll = collection("Structure_WingSupports", parent)
-    stone, steel = MeshBuf(), MeshBuf()
+    """竖向支承：Y 形斜柱、水中石墩柱、补充柱、立于主屋顶上的二层柱，以及各屋面的柱顶环梁。"""
+    import structure as ST
+    coll = collection("Structure_Supports", parent)
+    stone, steel, cols = MeshBuf(), MeshBuf(), MeshBuf()
+    # 西翼尖 Y 形斜柱：水中石墩 + 钢节点 + 两根变截面钢管
     bx, by = P.YCOL_BASE
     v, f = lathe([(0, -1.7), (1.05, -1.7), (1.05, P.FFL - 0.35), (0.95, P.FFL - 0.2), (0.85, P.FFL), (0, P.FFL)], 64, (bx, by, 0))
     stone.add(v, f)
@@ -850,22 +846,72 @@ def build_supports(M, parent):
         top = np.array([tx, ty, tz])
         k = np.linspace(0, 1, 24)
         path = node[None] * (1 - k[:, None]) + top[None] * k[:, None]
-        rad = 0.22 - 0.07 * k + 0.17 * np.clip((k - 0.86) / 0.14, 0, 1) ** 2.2
+        rad = 0.23 - 0.07 * k + 0.17 * np.clip((k - 0.86) / 0.14, 0, 1) ** 2.2
         v, f, uv = tube(path, rad, 20)
         steel.add(v, f)
-        v, f = lathe([(0, tz - 0.02), (0.44, tz - 0.02), (0.44, tz + 0.1), (0, tz + 0.1)], 32, (tx, ty, 0))
+        v, f = lathe([(0, tz - 0.02), (0.44, tz - 0.02), (0.44, tz + 0.12), (0, tz + 0.12)], 32, (tx, ty, 0))
         steel.add(v, f)
-    # C 东翼尖的水中石墩与古铜支座
-    px, py = P.C_PIER
-    pz = float(P.ROOF_C.underside(np.array([px]), np.array([py]))[0])
-    v, f = lathe([(0, -1.7), (0.62, -1.7), (0.62, pz - 0.45), (0.5, pz - 0.3), (0, pz - 0.3)], 48, (px, py, 0))
-    stone.add(v, f)
-    v, f = lathe([(0, pz - 0.3), (0.34, pz - 0.3), (0.26, pz - 0.12), (0.4, pz - 0.05), (0.4, pz + 0.05), (0, pz + 0.05)],
-                 40, (px, py, 0))
-    steel.add(v, f)
-    stone.build("WingSupports_StonePiers", coll, [M["stone_tidal"]], smooth=True)
-    steel.build("WingSupports_SteelStruts", coll, [M["metal"]], smooth=True)
+    # 低檐 C 东翼尖：水中石墩高出设计高潮位 0.6 m，其上钢柱承托翼尖
+    for px, py in P.C_PIERS:
+        _stone_pier(stone, (px, py), 0.6)
+        zu = float(P.ROOF_C.underside(np.array([px]), np.array([py]))[0])
+        add_column(cols, (px, py), 0.6, zu)
+    # 立于基座的补充柱
+    for c, roof in [(c, P.ROOF_A) for c in ST.A_EAST_COLS] + [(c, P.ROOF_C) for c in ST.C_EXTRA_COLS]:
+        add_column(cols, c, P.FFL, float(roof.underside(np.array([c[0]]), np.array([c[1]]))[0]))
+    # 二层柱：立于主屋顶结构层（屋面平台处以平台为基面），与一层柱上下对齐
+    for c in ST.B_COLS:
+        a_top, _ = P.ROOF_A.surfaces(np.array([c[0]]), np.array([c[1]]))
+        z0 = P.DECK if P.DECK_POLY.contains(Point(*c)) else float(a_top[0])
+        add_column(cols, c, z0, float(P.ROOF_B.underside(np.array([c[0]]), np.array([c[1]]))[0]))
+    stone.build("Supports_StonePiers", coll, [M["stone_tidal"]], smooth=True)
+    steel.build("Supports_YStrut_Steel", coll, [M["metal"]], smooth=True)
+    cols.build("Supports_Columns", coll, [M["metal"]], smooth=True)
+    # 柱顶环梁（钢箱梁 220 宽）：把径向主梁的荷载收给柱
+    rb = MeshBuf()
+    for roof, groups in ((P.ROOF_A, [ST.E1_COLS_INNER, ST.E1_COLS_OUTER]), (P.ROOF_B, [ST.B_COLS]),
+                         (P.ROOF_C, [ST.E2_COLS])):
+        for grp in groups:
+            for run in _column_runs(grp):
+                ring_beam(rb, roof, run)
+    rb.build("Supports_RingBeams_Steel", coll, [M["metal"]], smooth=False)
     return coll
+
+
+def _column_runs(cols, max_gap=6.5):
+    """把柱按绕庭院的角度排序，相距不超过 max_gap 的连成一段环梁。"""
+    cols = np.asarray(cols)
+    if len(cols) < 2:
+        return []
+    ang = np.degrees(np.arctan2(cols[:, 1], cols[:, 0]))
+    r = np.hypot(cols[:, 0], cols[:, 1])
+    order = np.argsort(ang)
+    cols, r = cols[order], r[order]
+    runs, cur = [], [cols[0]]
+    for k in range(1, len(cols)):
+        if np.linalg.norm(cols[k] - cols[k - 1]) <= max_gap and abs(r[k] - r[k - 1]) < 1.5:
+            cur.append(cols[k])
+        else:
+            runs.append(cur); cur = [cols[k]]
+    runs.append(cur)
+    return [np.array(rn) for rn in runs if len(rn) >= 2]
+
+
+def ring_beam(buf, roof, cols, w=0.22):
+    """柱间直线段钢箱梁：梁底与主梁底平，梁顶顶住屋面结构层。"""
+    pts = []
+    for a, b in zip(cols[:-1], cols[1:]):
+        k = np.linspace(0, 1, max(2, int(np.linalg.norm(b - a) / 0.3)))
+        pts.append(a[None] * (1 - k[:, None]) + b[None] * k[:, None])
+    pts = np.vstack(pts)
+    d = roof.dist_edge(pts[:, 0], pts[:, 1])
+    _, bot = roof.surfaces(pts[:, 0], pts[:, 1], d)
+    under = bot - roof.beam_depth(d)
+    t = np.gradient(pts, axis=0)
+    t /= np.linalg.norm(t, axis=1, keepdims=True)
+    nrm = np.stack([-t[:, 1], t[:, 0]], 1)
+    v, f, uv = band(pts, under - 0.02, bot + 0.02, -w / 2, w / 2, nrm, closed=False)
+    buf.add(v, f)
 
 
 # =================================================================== 螺旋楼梯 + 圆形平台

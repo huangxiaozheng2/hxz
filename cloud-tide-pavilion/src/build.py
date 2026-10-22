@@ -16,82 +16,8 @@ import architecture as A  # noqa: E402
 import scenery as S  # noqa: E402
 import scene as SC  # noqa: E402
 from bl import collection  # noqa: E402
-
-
-def angle_deg(p):
-    return np.degrees(np.arctan2(p[:, 1], p[:, 0])) % 360
-
-
-def outer_side(mp, nrm):
-    radial = mp / np.linalg.norm(mp, axis=1, keepdims=True)
-    return (nrm * radial).sum(1)
-
-
-def ranges_from_mask(mask):
-    idx = np.where(mask)[0]
-    if not len(idx):
-        return []
-    runs = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
-    return [(int(r[0]), int(r[-1]) + 1) for r in runs]
-
-
-def end_caps(which):
-    """月牙端部（径向短边）做成实墙：玻璃与墙体在端部清晰交接。"""
-    def f(mp, nrm):
-        th = angle_deg(mp)
-        radial = np.abs(outer_side(mp, nrm)) < 0.55
-        out = []
-        for lo, hi in which:
-            out += ranges_from_mask(radial & (th > lo) & (th < hi))
-        return out
-    return f
-
-
-e3_solid = end_caps([(40, 66)])          # 二层观景厅东端弧墙：次屋顶的支承之一
-
-
-def e1_solid(mp, nrm):
-    """一层展廊外侧整体为实墙（美术馆避免直射光），月牙两端为端墙；庭院一侧保持玻璃。"""
-    th = angle_deg(mp)
-    o = outer_side(mp, nrm)
-    # 西端（螺旋楼梯所在的高厅）保持玻璃，让楼梯从外部可见
-    return ranges_from_mask(((o > 0.35) & (th < 148)) | ((np.abs(o) <= 0.35) & (th < 30)))
-
-
-def e1_windows(mp, nrm):
-    """实墙上的四处框景窗，各宽两跨，朝向水面的不同方向。"""
-    th = angle_deg(mp)
-    o = outer_side(mp, nrm)
-    out = []
-    for target in (32, 66, 100, 132):
-        cand = np.where(o > 0.6)[0]
-        i = int(cand[np.argmin(np.abs(th[cand] - target))])
-        out.append((i, i + 2))
-    return out
-
-
-def e1_doors(mp, nrm):
-    th = angle_deg(mp)
-    inner = outer_side(mp, nrm) < -0.8
-    out = []
-    for target in (40, 150):
-        cand = np.where(inner)[0]
-        if len(cand):
-            out.append(int(cand[np.argmin(np.abs(th[cand] - target))]))
-    return out
-
-
-def e2_doors(mp, nrm):
-    # 南侧凹入门廊的入口门 + 朝庭院的门
-    out = []
-    south = np.where((nrm[:, 1] < -0.85) & (np.abs(mp[:, 0]) < 2.2))[0]
-    if len(south):
-        out += [int(i) for i in south[np.argsort(np.abs(mp[south, 0]))[:1]]]
-    inner = np.where(outer_side(mp, nrm) < -0.85)[0]
-    th = angle_deg(mp)
-    if len(inner):
-        out.append(int(inner[np.argmin(np.abs(th[inner] - 270))]))
-    return out
+import structure as ST  # noqa: E402
+from facade import e1_solid, e1_windows, e1_doors, e2_doors, e3_solid  # noqa: E402
 
 
 def main(out_path, lite=False):
@@ -115,9 +41,10 @@ def main(out_path, lite=False):
         print("roof", roof.name, time.time() - t0)
 
     e1 = A.build_envelope("Envelope_E1_Gallery", P.E1, P.ROOF_A, P.FFL, M, env, solid=e1_solid, doors=e1_doors,
-                          windows=e1_windows, column_side="inner")
-    e2 = A.build_envelope("Envelope_E2_Lobby", P.E2, P.ROOF_C, P.FFL, M, env, doors=e2_doors)
-    e3 = A.build_envelope("Envelope_E3_Belvedere", P.E3, P.ROOF_B, P.DECK, M, env, solid=e3_solid, column_every=None)
+                          windows=e1_windows,
+                          columns=np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER]))
+    e2 = A.build_envelope("Envelope_E2_Lobby", P.E2, P.ROOF_C, P.FFL, M, env, doors=e2_doors, columns=ST.E2_COLS)
+    e3 = A.build_envelope("Envelope_E3_Belvedere", P.E3, P.ROOF_B, P.DECK, M, env, solid=e3_solid)
     print("envelopes", time.time() - t0)
 
     struct = collection("Structure", arch)

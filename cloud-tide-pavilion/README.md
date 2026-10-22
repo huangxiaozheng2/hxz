@@ -4,6 +4,7 @@
 
 ![展板一](renders/board_01.jpg)
 ![展板二](renders/board_02.jpg)
+![展板三](renders/board_03.jpg)
 
 ## 设计说明
 
@@ -29,20 +30,50 @@
 | 天光 | 屋面光缝 8 段，宽 0.7 m，沿展廊外墙内侧布置 |
 | 日照 | 冬至日落方位 242.6°，渲染时太阳高度角 4° |
 
-## 结构与构造
+## 结构体系
+
+**荷载路径。** 屋面板（轻钢龙骨 + 20 mm GRC）→ 100 mm 木格栅次肋 → 胶合木主梁（约 1.5 m 一根，与幕墙分格对齐）→ 柱顶钢箱环梁 → 柱 / 承重墙 / 电梯筒 / Y 形斜柱 / 水中石墩 → 钻孔灌注桩。
+
+**支承布置。**
+- 主屋顶 A：展廊内侧柱列 + 西端高厅外侧柱列（每 3 个幕墙分格一根，约 4.5 m）、展廊北侧承重实墙、电梯筒、东翼尖下一根补充柱；西翼尖由水中石墩上的 Y 形斜柱两肢托起。
+- 次屋顶 B：二层柱立在主屋顶结构层上，与一层内侧柱上下对齐；另由电梯筒（贯通至 B）、月洞墙和观景厅东端弧墙支承。
+- 低檐 C：门厅内外两侧柱列、西端一根补充柱；东翼尖下的基座已切除（净高不足处改为水面），由两处水中石墩上的钢柱承托。
+- 屋面上任一点到最近竖向支承不超过 5.8 m（`structure.py` 计算，展板三左下图）。
+
+| 构件 | 做法 |
+|---|---|
+| 主梁 | 胶合木 GL28h，宽 160；高 200（檐口）→ 600 / 520 / 480（A / B / C 支座），截面随悬挑弯矩加深 |
+| 次肋 | 木格栅 100 深，间距约 240 mm，端部统一收于阴影缝内线 |
+| 柱顶环梁 | 钢箱梁 220 宽，梁底与主梁底平 |
+| 柱 | 钢管 φ194×10，外张柱头，顶板 φ500 |
+| Y 形斜柱 | 变截面钢管 φ460 → φ320，铸钢节点，立于 φ2.1 m 石墩 |
+| 电梯筒 | 钢筋混凝土筒 φ2.3 m，由基础贯通至次屋顶 |
+| 月洞墙 / 展廊外墙 | 钢筋混凝土承重墙，外饰矿物质涂层 |
+| 水中石墩 | 花岗岩外包 φ1.24 m，高出设计高潮位 0.6 m |
+| 坡道 | 螺旋钢箱梁 260 高，外侧 φ180 钢柱每 30° 一根，以钢悬臂托住经过的每一圈 |
+
+**初步校核**（`structure.prelim_checks()`；屋面恒载 1.5 / 活载 0.5 kPa，屋面平台恒载 3.0 / 活载 3.5 kPa，分项系数 1.3 / 1.5）：
+
+| 部位 | 跨度 / 悬挑 | 截面 | 应力比 | 挠度 |
+|---|---|---|---|---|
+| A 主梁悬挑 | 5.7 m | 160×600 | 0.35 | L/536 |
+| B 主梁悬挑 | 5.3 m | 160×520 | 0.42 | L/412 |
+| C 主梁悬挑 | 5.8 m | 160×480 | 0.58 | L/258 |
+| 屋面平台主梁 | 7.3 m 简支 | 160×600 | 0.50 | L/739 |
+| 一层柱（叠加二层柱） | 5.0 m | φ194×10 | 0.23（N = 305 kN，稳定承载 1355 kN） | — |
+
+悬挑一律按“到最近支承的距离”当作悬臂计算，偏保守。这些是方案阶段的手算，只用来确认构件尺度是否合理；深化阶段需要结构工程师建模复核（风荷载、地震、木梁与钢环梁节点、桩基）。
+
+## 构造
 
 | 部位 | 做法 |
 |---|---|
-| 主屋顶 A | 由展廊外侧实墙、内侧柱列（φ190，与竖梃对应）和电梯筒支承；西翼尖由水中石墩上的 Y 形斜柱托起 |
-| 次屋顶 B | 由电梯筒（φ2.3 m，贯通至 B）、月洞墙和观景厅东端弧墙三处支承；月洞墙两端在顶部以凹曲线外张贴合屋面，与柱头同一曲线语言 |
-| 低檐 C | 由门厅柱列支承；东翼尖轻落在水中石墩的古铜支座上 |
-| 檐下木梁 | 胶合木径向梁，截面高度由檐口 100 mm 向支座加深到 340 mm（悬挑弯矩越大截面越高），端部统一收于阴影缝内线 |
-| 屋檐 | 楔形截面，核心厚 0.55–0.85 m，边缘收薄到 0.15 m，半圆形拉丝金属包边；檐下 120 mm 阴影缝 |
+| 屋檐 | 楔形截面，边缘收薄到 0.15 m，半圆形拉丝金属包边；檐下 120 mm 阴影缝 |
 | 排水 | 距檐口 0.45–0.75 m 一圈余弦形浅槽，内衬深色金属格栅 |
 | 展廊外墙 | 象牙白矿物质实墙，四处两跨宽的框景窗，外挑 0.62 m 的古铜色深窗框 |
 | 幕墙 | 等宽分段约 1.5 m，顶部金属收口带封至木梁底，室内侧暗藏洗木梁的灯带 |
 | 潮池石材 | 高潮位以下颜色加深、表面湿润，近池底泛淡青褐色，低潮时显出潮痕 |
-| 栏杆 | 分段玻璃（板缝 12 mm）+ φ48 圆管扶手 + 底部压条；坡道外侧一圈细柱以短悬臂托住各圈坡道 |
+| 栏杆 | 分段玻璃（板缝 12 mm）+ φ48 圆管扶手 + 底部压条 |
 
 ## 文件
 
@@ -51,17 +82,20 @@ cloud-tide-pavilion/
 ├── model/
 │   ├── cloud_tide_pavilion.blend   完整场景（集合分组、材质、灯光、相机）
 │   └── cloud_tide_pavilion.glb     建筑主体 + 庭院（简化 PBR 材质，不含远景）
-├── renders/                        各机位渲染图、分析图、两张展板 board_01/02.jpg
+├── renders/                        各机位渲染图、分析图、结构轴测图、三张展板 board_01/02/03.jpg
 └── src/
-    ├── plan.py          全部几何定义：三片屋顶、围合体、潮池与水口、坡道、日落轴线、结构点位、天窗
-    ├── architecture.py  屋顶与天窗、胶合木梁、幕墙与框景窗、基座与潮池、平台、坡道、电梯筒、翼尖支承、螺旋楼梯、月洞墙
+    ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗
+    ├── facade.py        幕墙分格、实墙段、框景窗与门的位置
+    ├── structure.py     结构体系：柱网、承重墙、二层柱、支承距离检查、初步校核
+    ├── architecture.py  屋顶与天窗、胶合木主次梁、幕墙与框景窗、基座与潮池、平台、坡道、电梯筒、柱 / 环梁 / 斜柱 / 石墩、螺旋楼梯、月洞墙
     ├── scenery.py       树岛与雕塑、室内陈设与画作射灯、家具、人物、岛屿松树、远山
     ├── materials.py     材质库（统一以 M_ 开头）
     ├── scene.py         天空（物理天空 + 程序化薄云）、灯光、相机（每个机位带曝光和潮位）
     ├── build.py         总装 → .blend
     ├── render.py        渲染指定机位；按相机切换涨潮/落潮水位，dusk 机位切换为黄昏
-    ├── diagrams.py      总平面与日落轴线、沿轴线长剖面、潮位曲线
-    ├── boards.py        两张 A1 展板排版
+    ├── diagrams.py      总平面与日落轴线、沿轴线长剖面、潮位曲线、支承距离图
+    ├── struct_axo.py    结构轴测图（屋面半透明，承重构件着色）与标注锚点
+    ├── boards.py        三张 A1 展板排版
     └── export_glb.py    导出 GLB
 ```
 
@@ -70,10 +104,10 @@ cloud-tide-pavilion/
 ```
 CloudTidePavilion
 ├── Architecture
-│   ├── Roofs            Roof_A_Main / Roof_B_Upper / Roof_C_Low（_Shell、_EdgeTrim、_SoffitRibs，A 另有 _Skylight_*）
+│   ├── Roofs            Roof_A_Main / Roof_B_Upper / Roof_C_Low（_Shell、_EdgeTrim、_SoffitRibs、_PrimaryBeams_Glulam，A 另有 _Skylight_*）
 │   ├── Envelopes        Envelope_E1_Gallery / E2_Lobby / E3_Belvedere（_Glass、_Mullions_Frames、_SolidWall、_WindowFrames、_CoveLED、_Columns）
 │   ├── Plinth_Terraces  Plinth_And_Bridge、Courtyard_TidalBasin、Roof_Terrace_Deck、Terrace_MoonGate
-│   ├── Structure        Structure_LiftCore、Structure_WingSupports
+│   ├── Structure        Structure_LiftCore、Structure_Supports（Supports_Columns / RingBeams_Steel / YStrut_Steel / StonePiers）
 │   └── Circulation      Courtyard_Ramp、Hall_SpiralStair
 ├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures、Landscape
 ├── Lights
@@ -87,9 +121,10 @@ python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy 
 cd cloud-tide-pavilion
 ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend
 ../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders hero,axis,moon,court_ht,court_lt,aerial,axis_out,interior,terrace,stair,structure,detail,dusk --samples=128
+../venv/bin/python src/struct_axo.py model/cloud_tide_pavilion.blend renders/struct_axo.png --samples=64
 ../venv/bin/python src/diagrams.py renders
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb
 ```
 
-调整造型时修改 `src/plan.py`：三片屋顶的 `rin_keys` / `w_keys` / `h_keys` 控制点，`SOLSTICE_SUNSET_AZ`（换纬度即可重算轴线），`BASIN_STEPS` 与潮位，坡道参数。木梁、幕墙高度、柱高、栏杆、分析图都会随之更新。
+调整造型时修改 `src/plan.py`：三片屋顶的 `rin_keys` / `w_keys` / `h_keys` 控制点，`SOLSTICE_SUNSET_AZ`（换纬度即可重算轴线），`BASIN_STEPS` 与潮位，坡道参数。木梁、幕墙高度、柱高、栏杆、分析图都会随之更新；改完运行 `python src/structure.py` 看支承距离与初步校核是否仍在合理范围。

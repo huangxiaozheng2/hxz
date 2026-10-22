@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.patches import Circle, Polygon as MPoly, FancyArrowPatch
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan as P  # noqa: E402
@@ -102,7 +102,12 @@ def site_plan(path):
     for r, ang in P.YCOL_TOPS:
         t = (r * math.cos(math.radians(ang)), r * math.sin(math.radians(ang)))
         ax.plot([P.YCOL_BASE[0], t[0]], [P.YCOL_BASE[1], t[1]], color=INK, lw=1.6, zorder=6)
-    ax.add_patch(Circle(P.C_PIER, 0.62, fc=STONE_BEYOND, ec=INK, lw=0.6, zorder=6))
+    for q in P.C_PIERS:
+        ax.add_patch(Circle(q, 0.62, fc=STONE_BEYOND, ec=INK, lw=0.6, zorder=6))
+    # 柱位
+    import structure as ST
+    allc = np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER, ST.E2_COLS, ST.A_EAST_COLS, ST.C_EXTRA_COLS, P.C_PIERS])
+    ax.scatter(allc[:, 0], allc[:, 1], s=9, color=INK, zorder=7)
     # 日照方位
     for az, lab, col, lw in ((270.0, "春秋分日落 270°", MUTED, 0.9), (297.4, "夏至日落 297.4°", MUTED, 0.9)):
         d = np.array([math.sin(math.radians(az)), math.cos(math.radians(az))])
@@ -133,7 +138,7 @@ def site_plan(path):
     note(P.CORE_C, "电梯筒", (11.5, 14.5))
     note(tuple(P.MOON_C), "月洞墙", (-24, 10.5), ha="right")
     note(P.YCOL_BASE, "Y 形斜柱", (-21, -24.5), ha="center")
-    note(P.C_PIER, "水中石墩", (24, 6.5))
+    note(P.C_PIERS[1], "水中石墩", (24, 6.5))
     east = max(P.SKYLIGHTS, key=lambda g: g.centroid.x)
     note(east.representative_point().coords[0], "屋面光缝", (21, 14))
     note((14.5, 6.2), "展廊", (21, 10.5))
@@ -198,7 +203,7 @@ def section(path):
         d = roof.dist_edge(xy[ins, 0], xy[ins, 1])
         top, bot = roof.surfaces(xy[ins, 0], xy[ins, 1], d)
         T = np.full_like(s, np.nan); B = np.full_like(s, np.nan); U = np.full_like(s, np.nan)
-        T[ins] = top; B[ins] = bot; U[ins] = bot - roof.rib_depth(d)
+        T[ins] = top; B[ins] = bot; U[ins] = bot - roof.beam_depth(d)
         ax.fill_between(s, B, T, where=ins, color=POCHE, lw=0, zorder=5)
         ax.fill_between(s, U, B, where=ins, color=OAK, lw=0, zorder=5)
         labels[roof.name] = (s[ins], T[ins])
@@ -276,7 +281,7 @@ def section(path):
     xu, zu = labels["Roof_A_Main_U"]
     sel = xu < 0
     k = int(sel.sum() * 0.35)
-    note((xu[sel][k], zu[sel][k]), "胶合木径向梁  檐口 100 → 支座 340 mm", (-23.5, 8.0))
+    note((xu[sel][k], zu[sel][k]), "胶合木主梁  檐口 200 → 支座 600 mm", (-23.5, 8.0))
     note((-1.5, P.BASIN_FLOOR), "潮池", (-3.0, -1.95), ha="right")
     note((12.0, P.BASIN_FLOOR), "水口", (12.5, -1.95))
     note((-6.35, 3.2), "1:12 坡道", (-4.2, 4.9))
@@ -333,10 +338,89 @@ def tide_curve(path):
     plt.close(fig)
 
 
+# ======================================================================= 支承距离检查
+def support_map(path):
+    """三片屋面：任一点到最近竖向支承的距离（即该点的悬挑长度或半跨）。"""
+    import structure as ST
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list("tide", ["#f1f4f5", "#9fbccb", "#3f7391", "#173a4f"])
+    fig = plt.figure(figsize=(16, 6.6), dpi=200, facecolor=PAPER)
+    vmax = 6.0
+    titles = {P.ROOF_A: "A  主屋顶", P.ROOF_B: "B  次屋顶", P.ROOF_C: "C  低檐"}
+    for k, roof in enumerate(P.ROOFS):
+        ax = fig.add_axes([0.02 + k * 0.325, 0.12, 0.31, 0.66])
+        ax.set_facecolor(PAPER); ax.set_aspect("equal"); ax.axis("off")
+        xy, d = ST.support_distance(roof, step=0.2)
+        # 栅格化为连续色块
+        minx, miny, maxx, maxy = roof.poly.bounds
+        gx = np.arange(minx, maxx, 0.2); gy = np.arange(miny, maxy, 0.2)
+        grid = np.full((len(gy), len(gx)), np.nan)
+        ix = np.clip(np.round((xy[:, 0] - minx) / 0.2).astype(int), 0, len(gx) - 1)
+        iy = np.clip(np.round((xy[:, 1] - miny) / 0.2).astype(int), 0, len(gy) - 1)
+        grid[iy, ix] = np.minimum(d, vmax)
+        ax.imshow(np.ma.masked_invalid(grid), origin="lower", extent=(minx - 0.1, gx[-1] + 0.1, miny - 0.1, gy[-1] + 0.1),
+                  cmap=cmap, vmin=0, vmax=vmax, interpolation="nearest", zorder=1)
+        line_poly(ax, roof.poly, color=INK, lw=1.0, zorder=2)
+        for kind, g in ST.supports(roof):
+            if g.geom_type == "LineString":
+                x, y = g.xy
+                ax.plot(x, y, color=SUN, lw=3.0, solid_capstyle="round", zorder=3)
+            else:
+                c = g.centroid
+                if kind == "电梯筒":
+                    ax.add_patch(Circle((c.x, c.y), P.CORE_R, fc=SUN, ec="none", zorder=3))
+                elif kind == "水中石墩":
+                    ax.add_patch(MPoly([(c.x - 0.45, c.y - 0.45), (c.x + 0.45, c.y - 0.45), (c.x + 0.45, c.y + 0.45),
+                                        (c.x - 0.45, c.y + 0.45)], closed=True, fc=SUN, ec="none", zorder=3))
+                elif kind == "Y 形斜柱":
+                    ax.plot(c.x, c.y, marker="^", ms=7, color=SUN, zorder=3)
+                else:
+                    ax.plot(c.x, c.y, "o", ms=4.2, color=SUN, zorder=3)
+        minx, miny, maxx, maxy = P.ROOF_A.poly.union(P.ROOF_C.poly).bounds
+        frame = box(minx - 12, miny - 4, maxx + 10, maxy + 4)
+        ax.set_xlim(frame.bounds[0], frame.bounds[2]); ax.set_ylim(frame.bounds[1], frame.bounds[3])
+        i = int(np.argmax(d))
+        p = xy[i]
+        ax.plot(*p, marker="x", ms=8, mew=1.6, color=INK, zorder=4)
+        # 标注放在不压住屋面、也不出图框的一侧（文字约 9.5 × 2 m）
+        cands = []
+        for sx in ((1, -1) if p[0] > 0 else (-1, 1)):
+            for dy in (-1.5, 1.5, -3.5, 3.5):
+                tx, ty = p[0] + sx * 2.5, p[1] + dy
+                rect = box(min(tx, tx + sx * 9.5), ty - 1.0, max(tx, tx + sx * 9.5), ty + 1.0)
+                cost = rect.intersection(roof.poly).area + (0 if frame.contains(rect) else 100)
+                cands.append((cost, tx, ty, sx))
+        _, tx, ty, sx = min(cands, key=lambda c: c[0])
+        ax.annotate(f"最远 {d.max():.1f} m", xy=p, xytext=(tx, ty), fontsize=11, color=INK,
+                    ha="left" if sx > 0 else "right", va="center",
+                    arrowprops=dict(arrowstyle="-", color=INK, lw=0.7, shrinkA=2), zorder=5)
+        pos = ax.get_position()
+        fig.text(pos.x0 + 0.03, 0.84, titles[roof], fontsize=14, color=INK)
+        fig.text(pos.x0 + 0.03, 0.805, f"95% 的屋面距支承 ≤ {np.percentile(d, 95):.1f} m", fontsize=10, color=MUTED)
+    from matplotlib.lines import Line2D
+    hs = [Line2D([], [], ls="none", marker="o", ms=5, color=SUN), Line2D([], [], color=SUN, lw=3),
+          Line2D([], [], ls="none", marker="o", ms=12, color=SUN), Line2D([], [], ls="none", marker="^", ms=8, color=SUN),
+          Line2D([], [], ls="none", marker="s", ms=8, color=SUN), Line2D([], [], ls="none", marker="x", ms=8, mew=1.6, color=INK)]
+    fig.legend(hs, ["柱", "承重墙 / 月洞墙", "电梯筒", "Y 形斜柱顶", "水中石墩", "离支承最远点"], loc="lower left",
+               bbox_to_anchor=(0.02, 0.02), ncol=6, frameon=False, fontsize=10, labelcolor=INK, handletextpad=0.4,
+               columnspacing=1.6)
+    cax = fig.add_axes([0.68, 0.065, 0.26, 0.025])
+    sm = matplotlib.cm.ScalarMappable(cmap=cmap, norm=matplotlib.colors.Normalize(0, vmax))
+    cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
+    cb.set_ticks([0, 2, 4, 6]); cb.set_ticklabels(["0", "2", "4", "6 m"])
+    cb.outline.set_visible(False); cb.ax.tick_params(colors=MUTED, labelsize=10)
+    fig.text(0.02, 0.94, "支承距离检查", fontsize=18, color=INK)
+    fig.text(0.02, 0.905, "颜色为屋面任一点到最近竖向支承的距离，即该点的悬挑长度或半跨；橙色为柱、墙、电梯筒、斜柱与石墩",
+             fontsize=11, color=MUTED)
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(out, exist_ok=True)
     site_plan(os.path.join(out, "plan_axis.png"))
     section(os.path.join(out, "section.png"))
     tide_curve(os.path.join(out, "tide_curve.png"))
+    support_map(os.path.join(out, "support_map.png"))
     print("diagrams ->", out)
