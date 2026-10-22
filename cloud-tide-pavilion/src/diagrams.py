@@ -229,6 +229,64 @@ def section(path):
     ax.add_patch(MPoly([(cs - P.CORE_R, P.FFL), (cs + P.CORE_R, P.FFL), (cs + P.CORE_R, zc), (cs - P.CORE_R, zc)],
                        closed=True, fc=STONE_BEYOND, ec="#9b948a", lw=0.6, zorder=2))
     note_core = (cs, 8.5)
+    # 剖切面前后 12 m 内的竖向支承：面后为细实线（立面），面前为虚线（投影），让每片屋顶都看得到支点
+    import structure as ST
+    beyond = np.sign(np.dot(P.TREE_POS, P.AXIS_N))
+
+    def und(roof, c):
+        return float(roof.underside(np.array([c[0]]), np.array([c[1]]))[0])
+
+    def vline(c, z0, z1, lw=1.3, allow_front=False):
+        sc, nc = float(np.dot(c, P.AXIS)), float(np.dot(c, P.AXIS_N))
+        front = np.sign(nc) != beyond
+        if abs(nc) > 12 or abs(nc) < 0.3 or (front and not allow_front):
+            return None
+        ax.plot([sc, sc], [z0, z1], color="#b3aba0" if front else "#958d82", lw=lw,
+                ls=(0, (4, 3)) if front else "-", zorder=2.5)
+        return sc, front
+    # 剖切面后的屋顶轮廓（立面，浅色）
+    for roof in P.ROOFS:
+        minx, miny, maxx, maxy = roof.poly.bounds
+        X, Y = np.meshgrid(np.arange(minx, maxx, 0.15), np.arange(miny, maxy, 0.15))
+        X, Y = X.ravel(), Y.ravel()
+        m = shapely.contains_xy(roof.poly, X, Y) & (np.sign(X * P.AXIS_N[0] + Y * P.AXIS_N[1]) == beyond)
+        X, Y = X[m], Y[m]
+        d = roof.dist_edge(X, Y)
+        top, bot = roof.surfaces(X, Y, d)
+        und_ = bot - roof.beam_depth(d)
+        sv = X * P.AXIS[0] + Y * P.AXIS[1]
+        bins = np.round(sv / 0.1).astype(int)
+        ub = np.unique(bins)
+        lo = np.array([und_[bins == b].min() for b in ub]); hi = np.array([top[bins == b].max() for b in ub])
+        xs_ = ub * 0.1
+        gaps = np.where(np.diff(ub) > 2)[0] + 1
+        for seg in np.split(np.arange(len(ub)), gaps):
+            ax.fill_between(xs_[seg], lo[seg], hi[seg], color="#e8e2d8", ec="#cdc5b9", lw=0.6, zorder=1.5)
+    for c in np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER, ST.A_EAST_COLS]):
+        vline(c, P.FFL, und(P.ROOF_A, c))
+    for c in np.vstack([ST.E2_COLS, ST.C_EXTRA_COLS]):
+        vline(c, P.FFL, und(P.ROOF_C, c))
+    for c in ST.B_COLS:
+        a_top, _ = P.ROOF_A.surfaces(np.array([c[0]]), np.array([c[1]]))
+        z0 = P.DECK if P.DECK_POLY.contains(Point(*c)) else float(a_top[0])
+        vline(c, z0, und(P.ROOF_B, c))
+    for c in P.C_PIERS:                                              # 水中石墩 + 钢柱
+        r = vline(c, 0.6, und(P.ROOF_C, c), lw=1.6, allow_front=True)
+        if r:
+            ax.add_patch(MPoly([(r[0] - 0.62, -1.7), (r[0] + 0.62, -1.7), (r[0] + 0.62, 0.6), (r[0] - 0.62, 0.6)],
+                               closed=True, fc="none", ec="#b3aba0", lw=1.0, ls=(0, (4, 3)), zorder=2.5))
+    yb = np.array(P.YCOL_BASE)                                       # Y 形斜柱：石墩 + 两肢
+    sb = float(np.dot(yb, P.AXIS))
+    ax.add_patch(MPoly([(sb - 1.05, -1.7), (sb + 1.05, -1.7), (sb + 1.05, P.FFL), (sb - 1.05, P.FFL)], closed=True,
+                       fc="none", ec="#b3aba0", lw=1.0, ls=(0, (4, 3)), zorder=2.5))
+    y_tops = []
+    for rr, aa in P.YCOL_TOPS:
+        t = np.array([rr * math.cos(math.radians(aa)), rr * math.sin(math.radians(aa))])
+        st, zt = float(np.dot(t, P.AXIS)), und(P.ROOF_A, t)
+        ax.plot([sb, st], [P.FFL + 0.55, zt], color="#b3aba0", lw=1.8, ls=(0, (4, 3)), zorder=2.5)
+        y_tops.append((st, zt))
+    fig.text(0.97, 0.035, "浅色：剖切面后的屋顶与柱（立面）    虚线：剖切面前的 Y 形斜柱与水中石墩（投影）",
+             fontsize=9, color=MUTED, ha="right")
     # 外侧细柱列（立面）
     for xe in (-(P.RAMP_R + P.RAMP_W / 2 + 0.16),):
         ax.plot([xe, xe], [P.FFL, 5.4], color=MUTED, lw=0.8, zorder=3)
@@ -289,6 +347,10 @@ def section(path):
     note((-12.6, P.DECK), "屋面平台 +6.30", (-23.5, 10.6))
     note((ts, 5.2), "树岛（剖切面后）", (3.2, 9.6))
     note(note_core, "电梯筒（剖切面后）· 承托次屋顶", (-2.0, 11.4))
+    ym = ((sb + y_tops[0][0]) / 2, (P.FFL + 0.55 + y_tops[0][1]) / 2)
+    note(ym, "Y 形斜柱（投影）", (21.5, 4.6))
+    cp = min(P.C_PIERS, key=lambda c: abs(float(np.dot(c, P.AXIS_N))))
+    note((float(np.dot(cp, P.AXIS)), 0.3), "水中石墩（投影）", (-23.5, 1.0))
     for z, txt in ((P.DECK, "+6.30"), (P.FFL, "+0.85 首层"), (P.HIGH_TIDE, "±0.00 设计高潮位"),
                    (P.LOW_TIDE, "-0.95 设计低潮位")):
         ax.plot([33.2, 33.9], [z, z], color=INK, lw=0.8, zorder=9)

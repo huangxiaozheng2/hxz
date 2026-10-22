@@ -213,7 +213,7 @@ def board2(R, D, out):
     im.save(out, quality=92)
 
 
-def axo_with_labels(png, w, h, label_w=360, fs=30):
+def axo_with_labels(png, w, h, label_w=360, fs=30, margin=0):
     """结构轴测图 + 两侧标注。图先裁到内容范围并缩放，标注按锚点高度排开，折线引线连到构件。"""
     import json
     raw = Image.open(png).convert("RGBA")
@@ -244,9 +244,9 @@ def axo_with_labels(png, w, h, label_w=360, fs=30):
             ax_, ay = pts[k]
             tw = d.textlength(k, font=f)
             if side == "l":
-                tx, lx, ex = 0, tw + 14, label_w - 10
+                tx, lx, ex = margin, margin + tw + 14, label_w - 10
             else:
-                tx, lx, ex = w - tw, w - tw - 14, w - label_w + 10
+                tx, lx, ex = w - margin - tw, w - margin - tw - 14, w - label_w + 10
             d.text((tx, t - fs * 0.62), k, font=f, fill=INK)
             d.line([(lx, t), (ex, t), (ax_, ay)], fill=lead, width=2, joint="curve")
             d.ellipse([ax_ - 9, ay - 9, ax_ + 9, ay + 9], fill=PAPER)
