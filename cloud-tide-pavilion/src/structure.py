@@ -14,7 +14,7 @@ import shapely
 from shapely.geometry import Point, LineString
 
 import plan as P
-from facade import envelope_bays, outer_side, angle_deg, e1_solid, e3_solid
+from facade import envelope_bays, outer_side, e1_solid, e3_solid
 
 COLUMN_EVERY = 3            # 每 3 个幕墙分格（约 4.5 m）一根柱
 COLUMN_INSET = 0.85         # 柱心距玻璃线
