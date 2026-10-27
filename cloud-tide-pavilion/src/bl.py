@@ -15,8 +15,9 @@ def collection(name, parent=None):
 
 # ------------------------------------------------------------------ 网格
 def mesh_object(name, verts, faces, coll, mats=None, mat_idx=None, smooth=True, uv=None,
-                loop_uv=None, location=(0, 0, 0)):
-    """verts: (N,3)；faces: 等长整数数组 (F,k) 或 list[list]；uv: (N,2) 逐顶点。"""
+                loop_uv=None, location=(0, 0, 0), flat_shade=False):
+    """verts: (N,3)；faces: 等长整数数组 (F,k) 或 list[list]；uv: (N,2) 逐顶点。
+    smooth=False 时沿用 Blender 新建网格的默认着色（平滑）；flat_shade=True 才强制平直着色，用于盒体类构件。"""
     verts = np.asarray(verts, np.float32).reshape(-1, 3)
     if isinstance(faces, np.ndarray) and faces.ndim == 2:
         sizes = np.full(len(faces), faces.shape[1], np.int32)
@@ -41,8 +42,8 @@ def mesh_object(name, verts, faces, coll, mats=None, mat_idx=None, smooth=True, 
         lay.data.foreach_set("uv", np.asarray(loop_uv, np.float32).ravel())
     me.update(calc_edges=True)
     me.validate(clean_customdata=False)
-    if smooth:
-        me.polygons.foreach_set("use_smooth", np.ones(len(me.polygons), bool))
+    if smooth or flat_shade:
+        me.polygons.foreach_set("use_smooth", np.full(len(me.polygons), not flat_shade, bool))
     ob = bpy.data.objects.new(name, me)
     ob.location = location
     coll.objects.link(ob)
@@ -77,11 +78,11 @@ class MeshBuf:
         self.m.extend([mat] * len(faces))
         self.n += len(verts)
 
-    def build(self, name, coll, mats, smooth=True):
+    def build(self, name, coll, mats, smooth=True, flat_shade=False):
         if not self.v:
             return None
         return mesh_object(name, np.vstack(self.v), self.f, coll, mats, self.m, smooth,
-                           uv=np.vstack(self.uv))
+                           uv=np.vstack(self.uv), flat_shade=flat_shade)
 
 
 # ------------------------------------------------------------------ 扫掠

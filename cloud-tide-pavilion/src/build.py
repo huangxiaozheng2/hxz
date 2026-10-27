@@ -17,7 +17,7 @@ import scenery as S  # noqa: E402
 import scene as SC  # noqa: E402
 from bl import collection  # noqa: E402
 import structure as ST  # noqa: E402
-from facade import e1_solid, e1_windows, e1_doors, e2_doors, e3_solid  # noqa: E402
+from facade import e1_solid, e1_windows, e1_doors, e2_doors, e3_solid, e3_doors  # noqa: E402
 
 
 def main(out_path, lite=False):
@@ -44,7 +44,8 @@ def main(out_path, lite=False):
                           windows=e1_windows,
                           columns=np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER]))
     e2 = A.build_envelope("Envelope_E2_Lobby", P.E2, P.ROOF_C, P.FFL, M, env, doors=e2_doors, columns=ST.E2_COLS)
-    e3 = A.build_envelope("Envelope_E3_Belvedere", P.E3, P.ROOF_B, P.DECK, M, env, solid=e3_solid)
+    e3 = A.build_envelope("Envelope_E3_Belvedere", P.E3, P.ROOF_B, P.DECK, M, env, solid=e3_solid,
+                          doors=e3_doors)
     print("envelopes", time.time() - t0)
 
     struct = collection("Structure", arch)
@@ -56,6 +57,8 @@ def main(out_path, lite=False):
     A.build_supports(M, struct)
     A.build_ramp(M, circ)
     A.build_spiral_stair(M, circ)
+    A.build_stair2(M, struct)
+    A.build_service(M, env)
     print("base/circ", time.time() - t0)
 
     site = collection("Site", root)

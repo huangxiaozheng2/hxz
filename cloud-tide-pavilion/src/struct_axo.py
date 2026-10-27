@@ -20,7 +20,7 @@ HIDE = ("People_", "Water_Surface", "Mountains_", "Islet", "Shore_", "Exhibit_",
         "Stair_Balustrade", "Ramp_Balustrade", "Deck_Balustrade", "Channel_Balustrade", "MoonGate_Glass",
         "Sculpture_FrostedGlass", "_Mullions_Frames", "_WindowFrames", "LiftCore_Doors")
 ACCENT = ("_Columns", "Supports_", "LiftCore_Shaft", "MoonGate_Wall", "_SolidWall", "Ramp_Colonnade",
-          "_PrimaryBeams", "Stair_HangerRods")
+          "_PrimaryBeams", "Stair_HangerRods", "EgressStair_Walls")
 GHOST = ("_Shell", "_EdgeTrim", "Skylight_Lining")
 
 
@@ -117,6 +117,7 @@ def main(blend, out_png, samples=64, render=True):
         "钢环梁 + 柱 φ194": (c1[0], c1[1], under(P.ROOF_A, c1) - 1.2),
         "二层柱（与一层柱对齐）": (b1[0], b1[1], P.DECK + 1.8),
         "电梯筒（贯通至 B）": (P.CORE_C[0], P.CORE_C[1], P.DECK + 1.6),
+        "疏散楼梯间（混凝土筒）": (*P.stair2_frame()[0], P.DECK + 2.4),
         "月洞墙（承重）": (P.MOON_C[0], P.MOON_C[1], P.DECK + 3.0),
         "Y 形斜柱": ((P.YCOL_BASE[0] + yt[0]) / 2, (P.YCOL_BASE[1] + yt[1]) / 2, 5.0),
         "水中石墩 + 钢柱": (P.C_PIERS[1][0], P.C_PIERS[1][1], 1.2),

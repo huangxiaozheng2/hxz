@@ -1,4 +1,4 @@
-"""竞赛展板排版（A1 横版 ×2）。用法：python boards.py 渲染目录 分析图目录 输出目录"""
+"""竞赛展板排版（A1 横版 ×4）。用法：python boards.py 渲染目录 分析图目录 输出目录"""
 import os
 import sys
 
@@ -118,7 +118,7 @@ def trimmed(path, pad=30):
 def board1(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 03  概念与形象")
+    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 04  概念与形象")
     top = 290
     left_w = 1060
     x0 = M + left_w + 70
@@ -150,9 +150,9 @@ def board1(R, D, out):
     y += 20
     d.line([(M, y), (M + left_w, y)], fill=RULE, width=2); y += 36
     d.text((M, y), "关键数据", font=font(46), fill=INK); y += 84
-    enclosed = P.E1.area + P.E2.area + P.E3.area
+    enclosed = P.E1.area + P.E2.area + P.E3.area + P.STAIR2.area
     rows = [
-        ("围合面积", f"约 {enclosed:.0f} m²（展廊 · 门厅 · 观景厅）"),
+        ("室内面积", f"约 {enclosed:.0f} m²（展廊 · 门厅 · 卫生间 · 观景厅 · 楼梯间）"),
         ("潮位", "设计高潮位 ±0.00 · 低潮位 -0.95 · 潮差 0.95 m"),
         ("标高", f"首层 +{P.FFL:.2f} · 屋面平台 +{P.DECK:.2f} · 主屋顶翼尖 +11.2"),
         ("坡道", f"1:12 · {P.RAMP_SEGMENTS} 段 × 升 {P.RAMP_SEG_RISE:.2f} m · 平台 1.5 m · 全长 {P.RAMP_LEN:.0f} m"),
@@ -173,7 +173,7 @@ def board1(R, D, out):
 def board2(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 03  技术与细部")
+    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 04  技术与细部")
     top = 290
     # 第一行：总平面 + 长剖面
     row1_h = 1180
@@ -201,11 +201,12 @@ def board2(R, D, out):
     xt = M + 4 * (pw + G) + 10
     yy = y3 + 4
     blocks = [
-        ("结构", "胶合木主梁约 1.5 m 一根，落在柱顶钢环梁上；柱、承重外墙、电梯筒、Y 形斜柱与水中石墩"
-                "共同支承三片屋面，屋面任一点距最近支承不超过 5.8 m。次屋顶的柱与一层柱上下对齐。详见第三张展板。"),
+        ("结构", "胶合木主梁约 1.5 m 一根，落在柱顶钢环梁上；柱、承重外墙、电梯筒、疏散楼梯间、Y 形斜柱与水中石墩"
+                "共同支承三片屋面，屋面任一点距最近支承不超过 5.8 m。详见第四张展板。"),
         ("光与热", "展廊朝外为实墙，西晒与直射光不进展厅；屋面光缝提供漫射天光；深挑檐为庭院一侧的玻璃遮阳。"),
-        ("水与韧性", "首层高出设计高潮位 0.85 m；潮池与水口由石材砌筑，可承受日常淹没，潮痕即是材料的记录。"),
-        ("无障碍", "坡道 1:12，每升 0.68 m 设 1.5 m 平台；电梯筒连通首层、屋面平台与观景厅。"),
+        ("水与雨", "首层高出设计高潮位 0.85 m；潮池与水口由石材砌筑，可承受日常淹没。屋面雨水由檐沟虹吸雨水斗收集，"
+                  "立管藏于钢柱与承重墙内，汇入基座内的蓄水池，回用于冲厕与潮池补水。"),
+        ("无障碍", "坡道 1:12，每升 0.68 m 设 1.5 m 平台；电梯连通首层与屋面平台；展廊东端设无障碍卫生间。"),
     ]
     for k, v in blocks:
         d.text((xt, yy), k, font=font(36), fill=ACCENT)
@@ -259,21 +260,22 @@ MEMBERS = [
     ("主梁", "胶合木 GL28h，宽 160；高 200（檐口）→ 600 / 520 / 480（A / B / C 支座）"),
     ("次肋", "木格栅 100 深，间距约 240 mm"),
     ("柱顶环梁", "钢箱梁 220 宽，梁底与主梁底平"),
-    ("柱", "钢管 φ194×10，外张柱头，顶板 φ500 承于主梁与环梁下"),
+    ("柱", "钢管 φ194×10，外张柱头，顶板 φ500；门厅柱柱脚刚接"),
     ("Y 形斜柱", "变截面钢管 φ460 → φ320，铸钢节点，立于 φ2.1 m 石墩"),
     ("电梯筒", "钢筋混凝土筒 φ2.3 m，由基础贯通至次屋顶"),
+    ("疏散楼梯间", "钢筋混凝土筒 2.9 × 7.0 m，墙厚 250，由基础直达次屋顶"),
     ("月洞墙 / 展廊外墙", "钢筋混凝土承重墙，外饰矿物质涂层"),
     ("水中石墩", "花岗岩外包 φ1.24 m，内为钢筋混凝土墩，高出设计高潮位 0.6 m"),
     ("坡道", "螺旋钢箱梁 260 高，外侧 φ180 钢柱每 30° 一根"),
-    ("基础", "钻孔灌注桩 + 承台，基座为钢筋混凝土箱体"),
+    ("基础", "钻孔灌注桩 + 承台，基座为钢筋混凝土箱体（内设设备间与蓄水池）"),
 ]
 
 
-def board3(R, D, out):
+def board4(R, D, out):
     import structure as ST
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  初步校核", "03 / 03  结构")
+    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  抗侧力  ·  初步校核", "04 / 04  结构")
     top = 290
     left_w = 2560
     sm = trimmed(f"{D}/support_map.png")
@@ -282,37 +284,51 @@ def board3(R, D, out):
     row1_h = y2 - G - top
     im.paste(axo_with_labels(f"{R}/struct_axo.png", left_w, row1_h), (M, top))
     im.paste(fit(sm, left_w, row2_h), (M, y2))
-    # 右栏：荷载路径 → 支承布置 → 主要构件 → 初步校核
+    # 右栏：荷载路径 → 支承布置 → 抗侧力与风 → 主要构件 → 初步校核
     x0 = M + left_w + 90
     tw = W - M - x0
-    y = top + 10
-    d.text((x0, y), "荷载路径", font=font(50), fill=INK); y += 86
+    y = top + 4
+    hf, bf = 46, 28
+
+    def head(t):
+        nonlocal y
+        d.text((x0, y), t, font=font(hf), fill=INK); y += 76
+    head("荷载路径")
     steps = ["屋面板：轻钢龙骨 + 20 mm GRC 面层",
              "次肋：100 mm 木格栅，传力给主梁",
              "主梁：胶合木，约 1.5 m 一根，与幕墙分格对齐；截面由檐口向支座加深",
              "柱顶环梁：钢箱梁，收集主梁荷载传给柱",
-             "柱 / 承重墙 / 电梯筒 / Y 形斜柱 / 水中石墩",
+             "柱 / 承重墙 / 电梯筒 / 疏散楼梯间 / Y 形斜柱 / 水中石墩",
              "钻孔灌注桩：基座与石墩之下"]
     for k, t in enumerate(steps):
-        d.text((x0, y), f"{k + 1}", font=font(32), fill=ACCENT)
-        y = para(d, (x0 + 46, y), t, 30, tw - 46, lh=1.42) + 8
-    y += 34
-    d.text((x0, y), "支承布置", font=font(50), fill=INK); y += 86
-    for t in ["次屋顶的柱立在主屋顶结构层上，与一层内侧柱上下对齐，荷载直落基础。",
+        d.text((x0, y), f"{k + 1}", font=font(30), fill=ACCENT)
+        y = para(d, (x0 + 44, y), t, bf, tw - 44, lh=1.4) + 6
+    y += 26
+    head("支承布置")
+    for t in ["次屋顶的柱立在主屋顶结构层上，与一层内侧柱上下对齐；月洞墙与楼梯间旁由墙直接承托，不再设柱。",
               "主屋顶西翼尖由水中石墩上的 Y 形斜柱托起；低檐东翼尖由两处水中石墩承托，翼尖下不再设基座。",
               "屋面上任一点到最近支承不超过 5.8 m（左下图），悬挑与跨度都落在胶合木梁的常规范围内。"]:
-        y = para(d, (x0, y), t, 30, tw, lh=1.42) + 12
-    y += 34
-    d.text((x0, y), "主要构件", font=font(50), fill=INK); y += 86
+        y = para(d, (x0, y), t, bf, tw, lh=1.4) + 8
+    y += 26
+    head("抗侧力与风")
+    for t in ["水平力由电梯筒、疏散楼梯间两处钢筋混凝土筒体与展廊北侧弧形墙、月洞墙承担；屋面板下设钢拉杆水平支撑，"
+              "形成刚性隔板把风力传给筒体。其余柱为铰接，只承竖向荷载。",
+              "低檐 C 下没有墙：门厅柱柱脚刚接、柱顶与环梁刚接，形成钢框架。",
+              "开阔水面上的大挑檐由风吸控制连接：柱头顶板与环梁之间设抗拔螺栓，主梁下缘由木格栅侧向约束，承受反向弯矩。"]:
+        y = para(d, (x0, y), t, bf, tw, lh=1.4) + 8
+    y += 26
+    head("主要构件")
     for a, b in MEMBERS:
-        d.text((x0, y), a, font=font(28), fill=ACCENT)
-        y = para(d, (x0 + 270, y), b, 28, tw - 270, lh=1.38) + 8
+        d.text((x0, y), a, font=font(26), fill=ACCENT)
+        y = para(d, (x0 + 250, y), b, 26, tw - 250, lh=1.36) + 6
     # 初步校核：与支承距离图同一行起
     chk = ST.prelim_checks()
-    yy = max(y + 40, y2)
-    d.text((x0, yy), "初步校核", font=font(50), fill=INK); yy += 80
-    yy = para(d, (x0, yy), "屋面恒载 1.5 / 活载 0.5 kPa；屋面平台恒载 3.0 / 活载 3.5 kPa；分项系数 1.3 / 1.5。"
-              "方案阶段手算，用于确认构件尺度，深化阶段需结构工程师建模复核。", 26, tw, color=MUTED, lh=1.42) + 18
+    lat = ST.lateral_checks()
+    yy = max(y + 34, y2)
+    d.text((x0, yy), "初步校核", font=font(hf), fill=INK); yy += 72
+    yy = para(d, (x0, yy), "屋面恒载 1.5 / 活载 0.5 kPa，平台恒载 3.0 / 活载 3.5 kPa，分项系数 1.3 / 1.5；"
+              f"基本风压 {ST.W0} kPa（A 类地貌，风振系数取 {ST.BETA_Z}），地震 7 度（0.10 g）。"
+              "方案阶段手算，用于确认构件尺度，深化阶段需结构工程师建模复核。", 24, tw, color=MUTED, lh=1.4) + 14
     names = {"Roof_A_Main": "A 主梁悬挑", "Roof_B_Upper": "B 主梁悬挑", "Roof_C_Low": "C 主梁悬挑"}
     rows = []
     for k, v in chk.items():
@@ -324,12 +340,67 @@ def board3(R, D, out):
                  f"应力比 {v['util']:.2f} · 挠度 L/{v['ratio']:.0f}"))
     v = chk["column"]
     rows.append(("一层柱 φ194×10", f"轴力 {v['N']:.0f} kN", f"稳定承载 {v['Nb']:.0f} kN · 应力比 {v['util']:.2f}"))
-    f1, f2 = font(30), font(28)
+    u = lat["uplift"]
+    rows.append(("风吸", f"净上吸 {u['net']:.2f} kPa", f"主梁反弯应力比 {u['rev_util']:.2f} · 柱头拉力 {u['T']:.0f} kN"))
+    c = lat["c_frame"]
+    rows.append(("门厅刚接柱", f"弯矩 {c['M']:.0f} kN·m", f"应力比 {c['util']:.2f} · 侧移 H/{c['drift_ratio']:.0f}（悬臂计）"))
+    sh = lat["shafts"]
+    rows.append(("筒体抗剪", f"风剪力 {sh['Vw']:.0f} kN", f"抗剪承载约为其 {sh['ratio']:.1f} 倍（地震 {sh['VE']:.0f} kN）"))
+    f1, f2 = font(28), font(26)
     for a, b, c in rows:
         d.text((x0, yy), a, font=f1, fill=ACCENT)
-        d.text((x0 + 300, yy), b, font=f2, fill=INK)
-        d.text((x0 + 300 + 330, yy), c, font=f2, fill=MUTED)
-        yy += 56
+        d.text((x0 + 270, yy), b, font=f2, fill=INK)
+        d.text((x0 + 270 + 300, yy), c, font=f2, fill=MUTED)
+        yy += 50
+    if yy > H - M or y > y2:
+        print("warning: board 4 right column overflow", y, y2, yy)
+    im.save(out, quality=92)
+
+
+def board3(R, D, out):
+    """平面与流线：首层平面、屋面平台平面、面积表、疏散与无障碍。"""
+    import program as PG
+    im = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(im)
+    header(d, "云上潮汐馆", "平面  ·  功能  ·  疏散与无障碍", "03 / 04  平面与流线")
+    top = 290
+    avail = H - M - top
+    gp = trimmed(f"{D}/plan_ground.png")
+    left_w = min(int(avail * gp.width / gp.height), 2520)
+    im.paste(fit(gp, left_w, avail), (M, top))
+    x0 = M + left_w + 90
+    tw = W - M - x0
+    dp = trimmed(f"{D}/plan_deck.png")
+    dh = int(tw * dp.height / dp.width)
+    im.paste(fit(dp, tw, dh), (x0, top))
+    y = top + dh + 50
+    d.text((x0, y), "功能与面积", font=font(46), fill=INK); y += 76
+    f1, f2 = font(28), font(26)
+    for name, area, level in PG.rooms():
+        d.text((x0, y), name, font=f1, fill=INK)
+        d.text((x0 + 420, y), f"{area:.0f} m²", font=f2, fill=INK)
+        d.text((x0 + 600, y), level, font=f2, fill=MUTED)
+        y += 46
+    y += 30
+    g, k = PG.ground_egress(), PG.deck_egress()
+    d.text((x0, y), "疏散", font=font(46), fill=INK); y += 76
+    for t in [f"首层：展廊两处庭院门、门厅南门与庭院门共 {len(g['exits'])} 个对外门，经环形步道至栈桥。任一点到最近对外门步行"
+              f" ≤ {g['walk_max']:.0f} m，直线 ≤ {g['straight_max']:.0f} m。",
+              f"屋面平台与观景厅：两个出口——1:12 坡道与封闭疏散楼梯间，相距 {k['exit_gap']:.0f} m。任一点到最近出口步行"
+              f" ≤ {k['walk_max']:.0f} m，直线 ≤ {k['straight_max']:.0f} m。",
+              "对照 GB 50016 第 5.5.17 条：展览厅内任一点至最近疏散门的直线距离不大于 30 m。距离按 0.25 m 网格计算，"
+              "墙与玻璃不可穿越。"]:
+        y = para(d, (x0, y), t, 28, tw, lh=1.42) + 10
+    y += 26
+    d.text((x0, y), "无障碍与服务", font=font(46), fill=INK); y += 76
+    for t in ["无障碍：1:12 坡道每升 0.68 m 设 1.5 m 平台；电梯连通首层与屋面平台；展廊东端设无障碍卫生间。",
+              "服务：卫生间与储藏位于展廊东端尖角，朝庭院一侧改为实墙；设备间与雨水蓄水池位于基座箱体内，由储藏间的检修口进入。"]:
+        y = para(d, (x0, y), t, 28, tw, lh=1.42) + 10
+    rem = H - M - (y + 24)
+    if rem > 260:                                   # 余下的高度放展廊西段：楼梯间墙面兼作展墙
+        im.paste(label(cover(shot(R, "gallery"), tw, rem), "展廊西段：疏散楼梯间的墙面兼作展墙", 28), (x0, y + 24))
+    if y > H - M:
+        print("warning: board 3 right column overflow", y)
     im.save(out, quality=92)
 
 
@@ -339,4 +410,5 @@ if __name__ == "__main__":
     board1(R, D, os.path.join(O, "board_01.jpg"))
     board2(R, D, os.path.join(O, "board_02.jpg"))
     board3(R, D, os.path.join(O, "board_03.jpg"))
+    board4(R, D, os.path.join(O, "board_04.jpg"))
     print("boards ->", O)

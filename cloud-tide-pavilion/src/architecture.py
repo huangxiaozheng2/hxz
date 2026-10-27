@@ -2,6 +2,7 @@
 import math
 import numpy as np
 import shapely
+import shapely.ops
 import triangle
 from shapely.geometry import Polygon, Point
 
@@ -710,7 +711,9 @@ def build_deck(M, parent):
     landing = (np.abs(th - (P.RAMP_END_DEG % 360)) < 8.5) & (r < 9.6)
     e3 = P.E3.buffer(0.35)
     in_e3 = shapely.contains_xy(e3, outer[:, 0], outer[:, 1])
-    ok = ~(landing | in_e3)
+    rail = outer - nrm * 0.25
+    at_stair = shapely.contains_xy(P.STAIR2.buffer(0.3), rail[:, 0], rail[:, 1])   # 栏杆止于楼梯间外墙
+    ok = ~(landing | in_e3 | at_stair)
     # 切成连续段
     idx = np.where(ok)[0]
     if len(idx):
@@ -912,6 +915,116 @@ def ring_beam(buf, roof, cols, w=0.22):
     nrm = np.stack([-t[:, 1], t[:, 0]], 1)
     v, f, uv = band(pts, under - 0.02, bot + 0.02, -w / 2, w / 2, nrm, closed=False)
     buf.add(v, f)
+
+
+# =================================================================== 疏散楼梯间 + 服务用房
+def _roof_under_or_nearest(roof, pts, drop=0.03):
+    """屋面主梁底标高；屋面范围以外的点取最近的屋面内点（楼梯间顶在檐口外延续同一高度）。"""
+    pts = np.asarray(pts, float)
+    inside = shapely.contains_xy(roof.poly.buffer(-0.05), pts[:, 0], pts[:, 1])
+    z = np.full(len(pts), np.nan)
+    if inside.any():
+        z[inside] = roof.underside(pts[inside, 0], pts[inside, 1])
+    for i in np.where(~inside)[0]:
+        q = shapely.ops.nearest_points(roof.poly.buffer(-0.06), Point(*pts[i]))[0]
+        z[i] = float(roof.underside(np.array([q.x]), np.array([q.y]))[0])
+    return z - drop
+
+
+def build_stair2(M, parent):
+    """疏散楼梯间：钢筋混凝土墙 250，双跑楼梯（踏步 170 × 270），上下出入口均在西端；
+    墙顶落到次屋顶主梁底，作为次屋顶与主屋顶的支承，也是两处抗侧力筒体之一。"""
+    coll = collection("Structure_EgressStair", parent)
+    c, e_r, e_t = P.stair2_frame()
+    hd, hl, t = (P.STAIR2_R_OUT - P.STAIR2_R_IN) / 2, P.STAIR2_HALF, P.STAIR2_WALL
+
+    def W(u, v):
+        return c + e_r * u + e_t * v
+
+    def ztop(u, v):
+        return float(_roof_under_or_nearest(P.ROOF_B, [W(u, v)])[0])
+
+    def lbox(buf, u0, u1, v0, v1, z0, z1=None, nv=1):
+        """局部坐标盒体；z1 为 None 时顶面随次屋顶主梁底起伏（沿 v 细分 nv 段）。"""
+        vs = np.linspace(v0, v1, nv + 1)
+        for a, b in zip(vs[:-1], vs[1:]):
+            corners = [(u0, a), (u1, a), (u1, b), (u0, b)]
+            zt = [z1 if z1 is not None else ztop(u, v) for u, v in corners]
+            V = [np.r_[W(u, v), z0] for u, v in corners] + [np.r_[W(u, v), z] for (u, v), z in zip(corners, zt)]
+            buf.add(np.array(V), [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]])
+
+    wall, door, steps = MeshBuf(), MeshBuf(), MeshBuf()
+    z0 = P.FFL
+    nseg = 14
+    lbox(wall, -hd, -hd + t, -hl, hl, z0, nv=nseg)              # 内墙（朝庭院，上部即观景厅北墙）
+    lbox(wall, hd - t, hd, -hl, hl, z0, nv=nseg)                # 外墙
+    lbox(wall, -hd + t, hd - t, -hl, -hl + t, z0, nv=2)         # 东端墙
+    # 西端墙：首层门与平台层门（外侧半宽，净宽 1.1 m），门洞以外为实墙
+    du0, du1, dh = 0.05, 1.15, 2.25
+    lbox(wall, -hd + t, du0, hl - t, hl, z0, nv=1)
+    lbox(wall, du1, hd - t, hl - t, hl, z0, nv=1)
+    lbox(wall, du0, du1, hl - t, hl, z0 + dh, P.DECK)
+    lbox(wall, du0, du1, hl - t, hl, P.DECK + dh, nv=1)
+    # 顶板
+    zt_cap = [ztop(u, v) for u, v in ((-hd, -hl), (hd, -hl), (hd, hl), (-hd, hl))]
+    cap = [np.r_[W(u, v), z] for (u, v), z in zip(((-hd, -hl), (hd, -hl), (hd, hl), (-hd, hl)), zt_cap)]
+    capb = [p - [0, 0, 0.18] for p in cap]
+    wall.add(np.array(capb + cap), [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]])
+    # 防火门（古铜色，关闭），门框
+    for zb in (z0, P.DECK):
+        lbox(door, du0 + 0.03, du1 - 0.03, hl - t * 0.55, hl - t * 0.3, zb, zb + dh - 0.03)
+        for uu in (du0, du1 - 0.04):
+            lbox(door, uu, uu + 0.04, hl - 0.02, hl + 0.015, zb, zb + dh)
+        lbox(door, du0, du1, hl - 0.02, hl + 0.015, zb + dh - 0.04, zb + dh)
+    # 楼梯：首层平台（西端）→ 第一跑（内侧半宽，向东）→ 中间平台（东端）→ 第二跑（外侧半宽，向西）→ 平台层
+    r_, g_ = P.STAIR2_RISER, P.STAIR2_TREAD
+    n1 = 16
+    v_start = hl - t - 1.25
+    z_mid = z0 + n1 * r_
+    for k in range(n1 - 1):                                     # 第一跑：15 个踏面
+        vv = v_start - k * g_
+        lbox(steps, -hd + t, -0.05, vv - g_, vv, z0 + (k + 1) * r_ - 0.42, z0 + (k + 1) * r_)
+    v_end = v_start - (n1 - 1) * g_
+    lbox(steps, -hd + t, hd - t, -hl + t, v_end, z_mid - 0.2, z_mid)            # 中间平台
+    for k in range(n1 - 1):                                     # 第二跑
+        vv = v_end + k * g_
+        zz = z_mid + (k + 1) * r_
+        lbox(steps, 0.05, hd - t, vv, vv + g_, zz - 0.42, zz)
+    lbox(steps, -hd + t, hd - t, v_start, hl - t, P.DECK - 0.22, P.DECK)       # 平台层平台
+    wall.build("EgressStair_Walls", coll, [M["wall"]], flat_shade=True)
+    door.build("EgressStair_FireDoors", coll, [M["bronze_satin"]], flat_shade=True)
+    steps.build("EgressStair_Flights", coll, [M["stone"]], flat_shade=True)
+    return coll
+
+
+def build_service(M, parent):
+    """展廊东端的卫生间与储藏：沿 θ = WC_THETA 的径向隔墙（含门），朝庭院一侧的实墙由 facade.e1_solid 给出。"""
+    coll = collection("Service_WC_Store", parent)
+    a = math.radians(P.WC_THETA)
+    d = np.array([math.cos(a), math.sin(a)])
+    nrm = np.array([-d[1], d[0]])
+    seg = shapely.geometry.LineString([d * 5, d * 30]).intersection(P.E1.buffer(-0.05))
+    r0, r1 = (float(np.hypot(*q)) for q in seg.coords)
+    r0, r1 = min(r0, r1), max(r0, r1)
+    buf, door = MeshBuf(), MeshBuf()
+
+    def piece(ra, rb, za=None, zb=None):
+        rr = np.linspace(ra, rb, max(2, int((rb - ra) / 0.25) + 1))
+        pts = d[None] * rr[:, None]
+        zt = P.ROOF_A.underside(pts[:, 0], pts[:, 1]) - 0.02 if zb is None else np.full(len(rr), zb)
+        nn = np.repeat(nrm[None], len(rr), 0)
+        v, f, uv = band(pts, P.FFL if za is None else za, zt, -0.08, 0.08, nn, closed=False)
+        buf.add(v, f)
+    dr0, dr1, dh = r0 + 0.6, r0 + 1.6, 2.25
+    piece(r0, dr0)
+    piece(dr1, r1)
+    piece(dr0, dr1, za=P.FFL + dh)
+    door_pts = d[None] * np.linspace(dr0 + 0.02, dr1 - 0.02, 2)[:, None]
+    v, f, uv = band(door_pts, P.FFL, P.FFL + dh - 0.02, -0.03, 0.03, np.repeat(nrm[None], 2, 0), closed=False)
+    door.add(v, f)
+    buf.build("Service_Partition", coll, [M["wall"]], flat_shade=True)
+    door.build("Service_Door", coll, [M["oak"]], flat_shade=True)
+    return coll
 
 
 # =================================================================== 螺旋楼梯 + 圆形平台

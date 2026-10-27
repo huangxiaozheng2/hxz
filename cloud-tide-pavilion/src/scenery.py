@@ -1,6 +1,7 @@
 """场地与配景：庭院树、磨砂玻璃雕塑、室内陈设、家具、岛屿、远山、水面。"""
 import math
 import numpy as np
+import shapely
 from shapely.geometry import Point, Polygon
 
 import plan as P
@@ -227,7 +228,9 @@ def bronze_form(kind, rng):
     return [(r * s, z * s) for r, z in prof]
 
 
-KEEP_CLEAR = [(10.5, 4.25), (12.0, 3.2), (-6.6, 6.0), (-12.0, 3.0), tuple(P.CORE_C)]
+KEEP_CLEAR = [(8.4, 7.5), (12.0, 3.2), (-6.6, 6.0), (-7.4, 7.6), (-12.0, 3.0), tuple(P.CORE_C)]
+# 楼梯间与服务用房周边不放展品
+NO_EXHIBIT = shapely.unary_union([P.STAIR2.buffer(1.1), P.SERVICE.buffer(1.0)])
 
 
 def build_interior(M, parent, e1_info, e2_info, e3_info):
@@ -248,29 +251,36 @@ def build_interior(M, parent, e1_info, e2_info, e3_info):
             c = mp[i] - nrm[i] * 1.9 + (mp[(i + 1) % len(mp)] - mp[i]) * 0.5
             clear = all(Point(*c).distance(Point(*k)) > 3.2 for k in KEEP_CLEAR)
             if poly.buffer(-1.2).contains(Point(*c)) and rng.random() < 0.7 and clear and \
-                    Point(*c).distance(Point(*P.STAIR_C)) > 3.4:
+                    Point(*c).distance(Point(*P.STAIR_C)) > 3.4 and not NO_EXHIBIT.contains(Point(*c)):
                 pedestal(c, z0)
-    pl.build("Exhibit_Pedestals", coll, [M["wall"]], smooth=False)
+    pl.build("Exhibit_Pedestals", coll, [M["wall"]], flat_shade=True)
     br.build("Exhibit_BronzeSculptures", coll, [M["bronze"]], smooth=True)
 
     # 一层展廊中部弧形展墙与画作
     walls, frames = MeshBuf(), MeshBuf()
     arts = [MeshBuf() for _ in range(4)]
     art_spots = []
-    for k, (a0, a1, r) in enumerate(((40, 64, 14.2), (88, 118, 15.0), (196 - 70, 196 - 52, 14.0))):
-        ang = np.radians(np.linspace(a0, a1, 40))
-        pts = np.stack([r * np.cos(ang), r * np.sin(ang)], 1)
-        if not all(P.E1.buffer(-0.6).contains(Point(*q)) for q in pts[::6]):
-            continue
-        nn = np.stack([np.cos(ang), np.sin(ang)], 1)
-        v, f, uv = band(pts, P.FFL, P.FFL + 3.4, -0.12, 0.12, nn, closed=False)
-        walls.add(v, f)
+    sc_, se_r, se_t = P.stair2_frame()
+    stair_face = sc_ - se_r * (P.STAIR2_R_OUT - P.STAIR2_R_IN) / 2           # 楼梯间朝庭院的墙面即展墙
+    for k, (a0, a1, r) in enumerate(((40, 64, 14.2), (None, None, None), (196 - 70, 196 - 52, 14.0))):
+        if a0 is not None:
+            ang = np.radians(np.linspace(a0, a1, 40))
+            pts = np.stack([r * np.cos(ang), r * np.sin(ang)], 1)
+            if not all(P.E1.buffer(-0.6).contains(Point(*q)) for q in pts[::6]):
+                continue
+            nn = np.stack([np.cos(ang), np.sin(ang)], 1)
+            v, f, uv = band(pts, P.FFL, P.FFL + 3.4, -0.12, 0.12, nn, closed=False)
+            walls.add(v, f)
         # 画作挂于朝庭院一侧
         for q in (0.3, 0.7):
-            am = math.radians(a0 + (a1 - a0) * q)
-            c = np.array([(r - 0.13) * math.cos(am), (r - 0.13) * math.sin(am)])
-            tdir = np.array([-math.sin(am), math.cos(am)])
-            ndir = -np.array([math.cos(am), math.sin(am)])
+            if a0 is None:
+                c = stair_face + se_t * (q - 0.5) * 4.0 + (-se_r) * 0.0
+                tdir, ndir = se_t, -se_r
+            else:
+                am = math.radians(a0 + (a1 - a0) * q)
+                c = np.array([(r - 0.13) * math.cos(am), (r - 0.13) * math.sin(am)])
+                tdir = np.array([-math.sin(am), math.cos(am)])
+                ndir = -np.array([math.cos(am), math.sin(am)])
             w, h = 1.15, 1.45
             zc = P.FFL + 1.75
             corners = [c - tdir * w / 2, c + tdir * w / 2]
@@ -428,7 +438,7 @@ def build_people(M, parent):
     deck.append((e3x, e3y, P.AXIS_DEG))
     for x, y, fdeg in deck:
         spots.append((x, y, P.DECK, fdeg, 0.1))
-    for x, y, fdeg in ((8.4, 7.2, 40), (-3.5, 12.8, 105), (-3.5, -12.2, 300), (2.6, -11.6, 120)):
+    for x, y, fdeg in ((5.6, 10.2, 150), (-1.6, 11.4, 105), (-3.5, -12.2, 300), (2.6, -11.6, 120)):
         spots.append((x, y, P.FFL, fdeg, 0.15))
     bufs = [MeshBuf() for _ in M["people"]]
     skinb = MeshBuf()

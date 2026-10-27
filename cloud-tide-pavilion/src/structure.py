@@ -75,10 +75,12 @@ C_EXTRA_COLS = np.array([_polar(12.4, 220.0)])
 
 # ----------------------------------------------------------------- 二层柱（立于主屋顶结构层）
 # 次屋顶 B 的柱与一层内侧柱上下对齐；另在主屋顶东翼尖柱之上再立一根
+# 月洞墙与疏散楼梯间旁边由墙体直接承托次屋顶，不再设柱（也让月洞框景里没有柱子）
 _b_zone = P.ROOF_B.poly.buffer(-0.6)
-B_COLS = np.array([c for c in np.vstack([E1_COLS_INNER, A_EAST_COLS]) if _b_zone.contains(Point(*c))])
-E3_WALLS = _solid_lines(P.E3, e3_solid)
 MOON_LINE = LineString([P.MOON_C - P.AXIS_N * P.MOON_HALF, P.MOON_C + P.AXIS_N * P.MOON_HALF])
+B_COLS = np.array([c for c in np.vstack([E1_COLS_INNER, A_EAST_COLS]) if _b_zone.contains(Point(*c))
+                   and MOON_LINE.distance(Point(*c)) > 1.5 and P.STAIR2.distance(Point(*c)) > 2.4])
+E3_WALLS = _solid_lines(P.E3, e3_solid)
 
 
 def _ycol_tops():
@@ -88,13 +90,14 @@ def _ycol_tops():
 def supports(roof):
     """返回 [(类型, shapely 几何)]：该屋面的全部竖向支承。"""
     core = Point(*P.CORE_C).buffer(P.CORE_R)
+    stair = P.STAIR2.exterior
     pts = lambda arr, kind: [(kind, Point(*p).buffer(CAPITAL_R)) for p in arr]
     if roof is P.ROOF_A:
         out = pts(E1_COLS_INNER, "柱") + pts(E1_COLS_OUTER, "柱") + pts(A_EAST_COLS, "柱")
-        out += [("承重墙", w) for w in E1_WALLS] + [("电梯筒", core)] + pts(_ycol_tops(), "Y 形斜柱")
+        out += [("承重墙", w) for w in E1_WALLS] + [("电梯筒", core), ("楼梯间", stair)] + pts(_ycol_tops(), "Y 形斜柱")
         return out
     if roof is P.ROOF_B:
-        out = pts(B_COLS, "柱") + [("电梯筒", core), ("月洞墙", MOON_LINE)]
+        out = pts(B_COLS, "柱") + [("电梯筒", core), ("楼梯间", stair), ("月洞墙", MOON_LINE)]
         out += [("承重墙", w) for w in E3_WALLS]
         return out
     out = pts(E2_COLS, "柱") + pts(C_EXTRA_COLS, "柱") + pts(P.C_PIERS, "水中石墩")
@@ -162,6 +165,70 @@ def prelim_checks():
     return out
 
 
+# ----------------------------------------------------------------- 风、抗侧力（方案阶段估算）
+W0 = 0.55                   # 基本风压 kPa（50 年重现期，按上海取值）
+MU_Z10, MU_Z15 = 1.28, 1.42 # A 类地貌（开阔水面）10 m / 15 m 高度变化系数
+BETA_Z = 1.2                # 风振与阵风影响，统一取 1.2（偏保守）
+MU_S_UP = 1.3               # 敞开式挑檐净风吸体型系数
+MU_S_WALL = 1.3             # 迎风 0.8 + 背风 0.5
+ALPHA_MAX = 0.08            # 7 度（0.10 g）多遇地震
+FT_C35 = 1.57               # 混凝土抗拉设计强度 MPa
+
+
+def _chs(D=193.7, t=10.0):
+    d = D - 2 * t
+    return dict(I=math.pi / 64 * (D ** 4 - d ** 4), Wpl=(D ** 3 - d ** 3) / 6)
+
+
+def lateral_checks():
+    """风吸（主梁反弯、柱头抗拔）、低檐 C 的悬臂柱、A/B 的两处钢筋混凝土筒体。
+    只用于判断体系与尺度是否合理，不替代结构计算。"""
+    out = {}
+    gk, qk = 1.5, 0.5
+    # 1 风吸：1.0 恒载（有利）+ 1.5 风
+    wk_up = BETA_Z * MU_S_UP * MU_Z15 * W0
+    net = 1.5 * wk_up - 1.0 * gk
+    down = 1.3 * gk + 1.5 * qk
+    c_util = prelim_checks()["Roof_C_Low"]["util"]
+    out["uplift"] = dict(wk=wk_up, net=net, ratio=net / down, rev_util=c_util * net / down,
+                         T=net * COLUMN_EVERY * PRIMARY_S * 5.0)
+    # 2 低檐 C：门厅柱柱脚刚接（悬臂柱），柱顶环梁连成整体
+    cols = np.vstack([E2_COLS, C_EXTRA_COLS, P.C_PIERS])
+    hs = np.array([float(P.ROOF_C.underside(np.array([c[0]]), np.array([c[1]]))[0]) - P.FFL for c in cols])
+    xy, _ = support_distance(P.ROOF_C, step=0.5)
+    top, _ = P.ROOF_C.surfaces(xy[:, 0], xy[:, 1])
+    h_face = float(np.mean(top)) - P.FFL
+    minx, miny, maxx, maxy = P.ROOF_C.poly.bounds
+    area = max(maxx - minx, maxy - miny) * h_face
+    wk_h = BETA_Z * MU_S_WALL * MU_Z10 * W0
+    Vk = wk_h * area
+    n = len(cols)
+    h = float(np.mean(hs))
+    sec = _chs()
+    M = 1.5 * Vk / n * h
+    drift = (Vk / n * 1000) * (h * 1000) ** 3 / (3 * 210000 * sec["I"])
+    out["c_frame"] = dict(area=area, Vk=Vk, n=n, h=h, M=M, util=M * 1e6 / (sec["Wpl"] * STEEL_FY),
+                          drift=drift, drift_ratio=h * 1000 / drift)
+    # 3 A / B：电梯筒 + 楼梯间两处筒体（屋面板下设水平支撑形成刚性隔板）
+    ab = shapely.unary_union([P.ROOF_A.poly, P.ROOF_B.poly])
+    minx, miny, maxx, maxy = ab.bounds
+    xy = np.vstack([support_distance(r, step=0.5)[0] for r in (P.ROOF_A, P.ROOF_B)])
+    tops = np.concatenate([r.surfaces(*support_distance(r, step=0.5)[0].T)[0] for r in (P.ROOF_A, P.ROOF_B)])
+    h_ab = float(np.mean(tops)) - P.FFL
+    area_ab = max(maxx - minx, maxy - miny) * h_ab
+    Vw = 1.5 * BETA_Z * MU_S_WALL * MU_Z15 * W0 * area_ab
+    roof_area = sum(r.poly.area for r in P.ROOFS)
+    GE = roof_area * (gk + 0.5 * qk) + P.DECK_POLY.area * (3.0 + 0.5 * 3.5)
+    VE = 1.3 * ALPHA_MAX * 0.85 * GE
+    # 抗剪：取较弱方向——楼梯间两道短墙 + 电梯筒一半截面
+    t = P.STAIR2_WALL
+    short = 2 * (P.STAIR2_R_OUT - P.STAIR2_R_IN) * t
+    core = math.pi * (P.CORE_R ** 2 - (P.CORE_R - 0.25) ** 2) / 2
+    Vr = 0.7 * FT_C35 * 1000 * (short + core)
+    out["shafts"] = dict(area=area_ab, Vw=Vw, GE=GE, VE=VE, Vr=Vr, ratio=Vr / max(Vw, VE))
+    return out
+
+
 def report():
     for roof in P.ROOFS:
         xy, d = support_distance(roof)
@@ -180,3 +247,5 @@ if __name__ == "__main__":
     report()
     for k, v in prelim_checks().items():
         print(k, {a: round(b, 2) for a, b in v.items()})
+    for k, v in lateral_checks().items():
+        print(k, {a: round(float(b), 3) for a, b in v.items()})

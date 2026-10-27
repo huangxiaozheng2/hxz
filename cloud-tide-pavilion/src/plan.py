@@ -229,6 +229,35 @@ E3 = polar_band(
 )
 E3 = _safe_inset(E3, ROOF_B, 1.8)
 
+# 疏散楼梯间：钢筋混凝土封闭楼梯间，双跑（踏步 170 × 270，梯段净宽 1.2 m），自首层直达屋面平台。
+# 位于展廊最宽处、电梯筒以西，一层两侧都留通道；上部成为观景厅北侧的实墙，顶部以阴影缝托住次屋顶。
+# 上下出入口都在西端：首层通展廊，平台层直接通向室外平台（距坡道到达点约 7.6 m，两个出口分开布置）。
+STAIR2_THETA = 105.0
+STAIR2_R_IN, STAIR2_R_OUT = 12.9, 15.8      # 内外墙面到庭院中心的垂距
+STAIR2_HALF = 3.5                           # 沿切向的半长
+STAIR2_WALL = 0.25
+STAIR2_RISER, STAIR2_TREAD, STAIR2_FLIGHT_W = 0.170, 0.27, 1.2
+
+
+def stair2_frame():
+    """楼梯间局部坐标：原点为平面中心，e_r 指向外（径向），e_t 指向西端（θ 增大方向）。"""
+    t = math.radians(STAIR2_THETA)
+    e_r = np.array([math.cos(t), math.sin(t)])
+    e_t = np.array([-math.sin(t), math.cos(t)])
+    c = e_r * (STAIR2_R_IN + STAIR2_R_OUT) / 2
+    return c, e_r, e_t
+
+
+def _stair2():
+    c, e_r, e_t = stair2_frame()
+    hd = (STAIR2_R_OUT - STAIR2_R_IN) / 2
+    return Polygon([c - e_r * hd - e_t * STAIR2_HALF, c + e_r * hd - e_t * STAIR2_HALF,
+                    c + e_r * hd + e_t * STAIR2_HALF, c - e_r * hd + e_t * STAIR2_HALF])
+
+
+STAIR2 = _stair2()
+E3 = E3.difference(STAIR2.buffer(0.02, join_style="mitre"))
+
 # 屋面平台（A 顶面上的铺装层）
 DECK_POLY = polar_band(
     24, 146,
@@ -373,6 +402,20 @@ if PLINTH_ALL.geom_type != "Polygon":
     PLINTH_ALL = max(PLINTH_ALL.geoms, key=lambda g: g.area)
 # 去掉潮池与水口后的首层平台
 PLINTH_CUT = PLINTH_ALL.difference(WATER_CUT)
+
+# 服务用房：展廊东端尖角改为卫生间与储藏（以 θ = 27° 的径向隔墙与展廊分开，朝庭院一侧改为实墙）；
+# 设备间位于其下的基座箱体内（-1.70 ~ +0.85），由卫生间旁的检修口进入。
+WC_THETA = 27.0
+
+
+def _wedge(a0, a1, r=40.0):
+    th = np.radians(np.linspace(a0, a1, 64))
+    return Polygon(np.vstack([[[0.0, 0.0]], np.stack([r * np.cos(th), r * np.sin(th)], 1)]))
+
+
+SERVICE = E1.intersection(_wedge(0.0, WC_THETA))
+WC_SPLIT_THETA = 15.0                        # 卫生间（含无障碍）| 储藏与设备检修口
+PLANT_ROOM = E1.intersection(_wedge(0.0, 46.0)).buffer(-0.5, 32)   # 基座箱体内，净高约 2.2 m
 
 # 柱下室内雕塑与螺旋楼梯（一层西厅）
 STAIR_C = (12.3 * math.cos(math.radians(166)), 12.3 * math.sin(math.radians(166)))

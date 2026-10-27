@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.patches import Circle, Polygon as MPoly, FancyArrowPatch
-from shapely.geometry import Point, box
+from shapely.geometry import Point, box, LineString, Polygon
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan as P  # noqa: E402
@@ -229,6 +229,13 @@ def section(path):
     ax.add_patch(MPoly([(cs - P.CORE_R, P.FFL), (cs + P.CORE_R, P.FFL), (cs + P.CORE_R, zc), (cs - P.CORE_R, zc)],
                        closed=True, fc=STONE_BEYOND, ec="#9b948a", lw=0.6, zorder=2))
     note_core = (cs, 8.5)
+    # 疏散楼梯间（剖切面后）：首层直达次屋顶
+    corners = np.array(P.STAIR2.exterior.coords)[:-1]
+    s_st = corners @ P.AXIS
+    z_st = float(np.min(P.ROOF_B.underside(corners[:, 0], corners[:, 1])))
+    ax.add_patch(MPoly([(s_st.min(), P.FFL), (s_st.max(), P.FFL), (s_st.max(), z_st), (s_st.min(), z_st)], closed=True,
+                       fc=STONE_BEYOND, ec="#9b948a", lw=0.6, zorder=1.6))
+    note_stair = (float(s_st.max()) - 1.5, z_st - 1.8)
     # 剖切面前后 12 m 内的竖向支承：面后为细实线（立面），面前为虚线（投影），让每片屋顶都看得到支点
     import structure as ST
     beyond = np.sign(np.dot(P.TREE_POS, P.AXIS_N))
@@ -347,6 +354,8 @@ def section(path):
     note((-12.6, P.DECK), "屋面平台 +6.30", (-23.5, 10.6))
     note((ts, 5.2), "树岛（剖切面后）", (3.2, 9.6))
     note(note_core, "电梯筒（剖切面后）· 承托次屋顶", (-2.0, 11.4))
+    ax.text(note_stair[0] + 1.2, note_stair[1] + 0.05, "疏散楼梯间（剖切面后）", fontsize=9, color=MUTED, ha="right",
+            va="center", zorder=9)
     ym = ((sb + y_tops[0][0]) / 2, (P.FFL + 0.55 + y_tops[0][1]) / 2)
     note(ym, "Y 形斜柱（投影）", (21.5, 4.6))
     cp = min(P.C_PIERS, key=lambda c: abs(float(np.dot(c, P.AXIS_N))))
@@ -402,31 +411,41 @@ def tide_curve(path):
 
 # ======================================================================= 支承距离检查
 def support_map(path):
-    """三片屋面：任一点到最近竖向支承的距离（即该点的悬挑长度或半跨）。"""
+    """前三格：三片屋面任一点到最近竖向支承的距离（即该点的悬挑长度或半跨）；第四格：抗侧力体系。"""
     import structure as ST
     from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.lines import Line2D
     cmap = LinearSegmentedColormap.from_list("tide", ["#f1f4f5", "#9fbccb", "#3f7391", "#173a4f"])
-    fig = plt.figure(figsize=(16, 6.6), dpi=200, facecolor=PAPER)
+    fig = plt.figure(figsize=(21, 7.4), dpi=200, facecolor=PAPER)
     vmax = 6.0
     titles = {P.ROOF_A: "A  主屋顶", P.ROOF_B: "B  次屋顶", P.ROOF_C: "C  低檐"}
-    for k, roof in enumerate(P.ROOFS):
-        ax = fig.add_axes([0.02 + k * 0.325, 0.12, 0.31, 0.66])
+    minx, miny, maxx, maxy = P.ROOF_A.poly.union(P.ROOF_C.poly).bounds
+    frame = box(minx - 12, miny - 4, maxx + 10, maxy + 4)
+
+    def panel(k):
+        ax = fig.add_axes([0.012 + k * 0.247, 0.17, 0.235, 0.6])
         ax.set_facecolor(PAPER); ax.set_aspect("equal"); ax.axis("off")
+        ax.set_xlim(frame.bounds[0], frame.bounds[2]); ax.set_ylim(frame.bounds[1], frame.bounds[3])
+        return ax
+
+    for k, roof in enumerate(P.ROOFS):
+        ax = panel(k)
         xy, d = ST.support_distance(roof, step=0.2)
         # 栅格化为连续色块
-        minx, miny, maxx, maxy = roof.poly.bounds
-        gx = np.arange(minx, maxx, 0.2); gy = np.arange(miny, maxy, 0.2)
+        rminx, rminy, rmaxx, rmaxy = roof.poly.bounds
+        gx = np.arange(rminx, rmaxx, 0.2); gy = np.arange(rminy, rmaxy, 0.2)
         grid = np.full((len(gy), len(gx)), np.nan)
-        ix = np.clip(np.round((xy[:, 0] - minx) / 0.2).astype(int), 0, len(gx) - 1)
-        iy = np.clip(np.round((xy[:, 1] - miny) / 0.2).astype(int), 0, len(gy) - 1)
+        ix = np.clip(np.round((xy[:, 0] - rminx) / 0.2).astype(int), 0, len(gx) - 1)
+        iy = np.clip(np.round((xy[:, 1] - rminy) / 0.2).astype(int), 0, len(gy) - 1)
         grid[iy, ix] = np.minimum(d, vmax)
-        ax.imshow(np.ma.masked_invalid(grid), origin="lower", extent=(minx - 0.1, gx[-1] + 0.1, miny - 0.1, gy[-1] + 0.1),
+        ax.imshow(np.ma.masked_invalid(grid), origin="lower", extent=(rminx - 0.1, gx[-1] + 0.1, rminy - 0.1, gy[-1] + 0.1),
                   cmap=cmap, vmin=0, vmax=vmax, interpolation="nearest", zorder=1)
         line_poly(ax, roof.poly, color=INK, lw=1.0, zorder=2)
         for kind, g in ST.supports(roof):
-            if g.geom_type == "LineString":
+            if g.geom_type in ("LineString", "LinearRing"):
                 x, y = g.xy
-                ax.plot(x, y, color=SUN, lw=3.0, solid_capstyle="round", zorder=3)
+                ax.plot(x, y, color=SUN, lw=3.0 if g.geom_type == "LineString" else 2.2, solid_capstyle="round",
+                        zorder=3)
             else:
                 c = g.centroid
                 if kind == "电梯筒":
@@ -438,9 +457,6 @@ def support_map(path):
                     ax.plot(c.x, c.y, marker="^", ms=7, color=SUN, zorder=3)
                 else:
                     ax.plot(c.x, c.y, "o", ms=4.2, color=SUN, zorder=3)
-        minx, miny, maxx, maxy = P.ROOF_A.poly.union(P.ROOF_C.poly).bounds
-        frame = box(minx - 12, miny - 4, maxx + 10, maxy + 4)
-        ax.set_xlim(frame.bounds[0], frame.bounds[2]); ax.set_ylim(frame.bounds[1], frame.bounds[3])
         i = int(np.argmax(d))
         p = xy[i]
         ax.plot(*p, marker="x", ms=8, mew=1.6, color=INK, zorder=4)
@@ -453,27 +469,324 @@ def support_map(path):
                 cost = rect.intersection(roof.poly).area + (0 if frame.contains(rect) else 100)
                 cands.append((cost, tx, ty, sx))
         _, tx, ty, sx = min(cands, key=lambda c: c[0])
-        ax.annotate(f"最远 {d.max():.1f} m", xy=p, xytext=(tx, ty), fontsize=11, color=INK,
+        ax.annotate(f"最远 {d.max():.1f} m", xy=p, xytext=(tx, ty), fontsize=13, color=INK,
                     ha="left" if sx > 0 else "right", va="center",
                     arrowprops=dict(arrowstyle="-", color=INK, lw=0.7, shrinkA=2), zorder=5)
         pos = ax.get_position()
-        fig.text(pos.x0 + 0.03, 0.84, titles[roof], fontsize=14, color=INK)
-        fig.text(pos.x0 + 0.03, 0.805, f"95% 的屋面距支承 ≤ {np.percentile(d, 95):.1f} m", fontsize=10, color=MUTED)
-    from matplotlib.lines import Line2D
+        fig.text(pos.x0 + 0.02, 0.85, titles[roof], fontsize=17, color=INK)
+        fig.text(pos.x0 + 0.02, 0.808, f"95% 的屋面距支承 ≤ {np.percentile(d, 95):.1f} m", fontsize=12.5, color=MUTED)
+    # 第四格：抗侧力体系
+    lat = ST.lateral_checks()
+    ax = panel(3)
+    for roof in P.ROOFS:
+        fill_poly(ax, roof.poly, fc="#e9e4db", ec="#b3aba0", lw=0.7, zorder=1)
+    grav = np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER, ST.A_EAST_COLS, ST.B_COLS])
+    ax.scatter(grav[:, 0], grav[:, 1], s=7, color="#9b948a", zorder=3)
+    for w in list(ST.E1_WALLS) + list(ST.E3_WALLS) + [ST.MOON_LINE]:
+        x, y = w.xy
+        ax.plot(x, y, color=SUN, lw=3.0, solid_capstyle="round", zorder=4)
+    fill_poly(ax, P.STAIR2, fc=SUN, ec="none", zorder=5)
+    ax.add_patch(Circle(P.CORE_C, P.CORE_R, fc=SUN, ec="none", zorder=5))
+    cf = np.vstack([ST.E2_COLS, ST.C_EXTRA_COLS, P.C_PIERS])
+    ax.scatter(cf[:, 0], cf[:, 1], s=30, marker="s", color=SUN, zorder=5)
+    for (x0, y0), (dx, dy) in (((frame.bounds[0] + 1.5, 2.0), (6.5, 0)), ((-2.0, frame.bounds[1] + 0.8), (0, 5.0))):
+        ax.add_patch(FancyArrowPatch((x0, y0), (x0 + dx, y0 + dy), arrowstyle="simple,head_width=6,head_length=7",
+                                     mutation_scale=2.2, color="#7fa3b8", lw=0, zorder=6))
+    ax.text(frame.bounds[0] + 1.5, 3.6, "风", fontsize=13, color="#5d7f93", zorder=6)
+    pos = ax.get_position()
+    fig.text(pos.x0 + 0.02, 0.85, "抗侧力体系", fontsize=17, color=INK)
+    fig.text(pos.x0 + 0.02, 0.808, f"风控制：设计风剪力 {lat['shafts']['Vw']:.0f} kN（地震 {lat['shafts']['VE']:.0f} kN）",
+             fontsize=12.5, color=MUTED)
     hs = [Line2D([], [], ls="none", marker="o", ms=5, color=SUN), Line2D([], [], color=SUN, lw=3),
           Line2D([], [], ls="none", marker="o", ms=12, color=SUN), Line2D([], [], ls="none", marker="^", ms=8, color=SUN),
           Line2D([], [], ls="none", marker="s", ms=8, color=SUN), Line2D([], [], ls="none", marker="x", ms=8, mew=1.6, color=INK)]
-    fig.legend(hs, ["柱", "承重墙 / 月洞墙", "电梯筒", "Y 形斜柱顶", "水中石墩", "离支承最远点"], loc="lower left",
-               bbox_to_anchor=(0.02, 0.02), ncol=6, frameon=False, fontsize=10, labelcolor=INK, handletextpad=0.4,
-               columnspacing=1.6)
-    cax = fig.add_axes([0.68, 0.065, 0.26, 0.025])
+    fig.legend(hs, ["柱", "承重墙 / 月洞墙 / 楼梯间", "电梯筒", "Y 形斜柱顶", "水中石墩 · 刚接柱", "离支承最远点"],
+               loc="lower left", bbox_to_anchor=(0.012, 0.0), ncol=3, frameon=False, fontsize=12.5, labelcolor=INK,
+               handletextpad=0.4, columnspacing=1.5)
+    hs2 = [Line2D([], [], ls="none", marker="o", ms=4, color="#9b948a"), Line2D([], [], ls="none", marker="s", ms=10, color=SUN)]
+    fig.legend(hs2, ["铰接柱：只承竖向荷载", "筒体 · 墙 · 刚接柱"], loc="lower left", bbox_to_anchor=(0.755, 0.0), ncol=1,
+               frameon=False, fontsize=12.5, labelcolor=INK, handletextpad=0.4, columnspacing=1.2)
+    cax = fig.add_axes([0.52, 0.07, 0.2, 0.024])
     sm = matplotlib.cm.ScalarMappable(cmap=cmap, norm=matplotlib.colors.Normalize(0, vmax))
     cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cb.set_ticks([0, 2, 4, 6]); cb.set_ticklabels(["0", "2", "4", "6 m"])
-    cb.outline.set_visible(False); cb.ax.tick_params(colors=MUTED, labelsize=10)
-    fig.text(0.02, 0.94, "支承距离检查", fontsize=18, color=INK)
-    fig.text(0.02, 0.905, "颜色为屋面任一点到最近竖向支承的距离，即该点的悬挑长度或半跨；橙色为柱、墙、电梯筒、斜柱与石墩",
-             fontsize=11, color=MUTED)
+    cb.outline.set_visible(False); cb.ax.tick_params(colors=MUTED, labelsize=12)
+    fig.text(0.012, 0.945, "支承距离检查 · 抗侧力体系", fontsize=22, color=INK)
+    fig.text(0.012, 0.9, "前三格颜色为屋面任一点到最近竖向支承的距离，即该点的悬挑长度或半跨；第四格橙色为承担风与地震水平力的构件",
+             fontsize=13, color=MUTED)
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+# ======================================================================= 平面图
+def _draw_envelope(ax, segments, wall_w=0.30, z=6):
+    """围合体：实墙为涂黑带，玻璃为细双线，门为缺口 + 开启弧线。"""
+    for kind, pts, inward in segments:
+        if kind == "solid":
+            fill_poly(ax, LineString(pts).buffer(wall_w / 2, cap_style="flat", join_style="mitre"), fc=POCHE,
+                      ec="none", zorder=z)
+        elif kind == "glass":
+            for off in (-0.05, 0.05):
+                q = pts + inward[None] * off
+                ax.plot(q[:, 0], q[:, 1], color=GLASS, lw=0.7, zorder=z)
+        else:
+            a, b = pts[0], pts[-1]
+            w = np.linalg.norm(b - a)
+            for p0, p1 in ((a, b), (b, a)):              # 双扇门，向室内开启
+                _door_swing(ax, p0, (p1 - p0) / w, inward, w / 2, z)
+
+
+def _door_swing(ax, hinge, closed_dir, open_dir, leaf, z=7):
+    a0 = math.degrees(math.atan2(closed_dir[1], closed_dir[0]))
+    a1 = math.degrees(math.atan2(open_dir[1], open_dir[0]))
+    if (a1 - a0) % 360 <= 180:
+        t1, t2 = a0, a0 + (a1 - a0) % 360
+    else:
+        t1, t2 = a1, a1 + (a0 - a1) % 360
+    ax.add_patch(matplotlib.patches.Arc(hinge, 2 * leaf, 2 * leaf, theta1=t1, theta2=t2, color=INK, lw=0.45, zorder=z))
+    e = hinge + np.asarray(open_dir) * leaf
+    ax.plot([hinge[0], e[0]], [hinge[1], e[1]], color=INK, lw=0.6, zorder=z)
+
+
+def _egress_paths(ax, eg, k=3):
+    import program as PG
+    for x, y, d in PG.farthest_points(eg, k):
+        path = PG.trace_path(eg, (x, y))
+        ax.plot(path[:, 0], path[:, 1], color=SUN, lw=1.2, ls=(0, (3, 2)), zorder=9)
+        if len(path) > 3:
+            ax.add_patch(FancyArrowPatch(path[-3], path[-1], arrowstyle="-|>", mutation_scale=9, color=SUN, lw=1.2,
+                                         zorder=9))
+        ax.add_patch(Circle((x, y), 0.25, fc=SUN, ec="none", zorder=9))
+        ax.text(x, y + 0.6, f"{d:.0f} m", ha="center", va="bottom", fontsize=9.5, color=SUN, zorder=10)
+
+
+def _stair2_plan(ax, level):
+    """疏散楼梯间：墙体涂黑，梯段踏步线，箭头表示上行方向。"""
+    c, e_r, e_t = P.stair2_frame()
+    hd, hl, t = (P.STAIR2_R_OUT - P.STAIR2_R_IN) / 2, P.STAIR2_HALF, P.STAIR2_WALL
+    W = lambda u, v: c + e_r * u + e_t * v
+    walls = P.STAIR2.difference(P.STAIR2.buffer(-t, join_style="mitre"))
+    door = Polygon([W(0.05, hl - t - 0.01), W(1.15, hl - t - 0.01), W(1.15, hl + 0.01), W(0.05, hl + 0.01)])
+    fill_poly(ax, walls.difference(door), fc=POCHE, ec="none", zorder=7)
+    n = 15
+    v_start = hl - t - 1.25
+    for k in range(n + 1):
+        vv = v_start - k * P.STAIR2_TREAD
+        for u0, u1 in ((-hd + t, -0.05), (0.05, hd - t)):
+            if level == "ground" and u0 > 0 and k < 9:
+                continue
+            a, b = W(u0, vv), W(u1, vv)
+            ax.plot([a[0], b[0]], [a[1], b[1]], color=INK, lw=0.45, zorder=7)
+    a, b = W(-0.05, v_start), W(-0.05, v_start - n * P.STAIR2_TREAD)
+    ax.plot([a[0], b[0]], [a[1], b[1]], color=INK, lw=0.6, zorder=7)
+    if level == "ground":
+        p0, p1 = W(-0.65, v_start + 0.4), W(-0.65, v_start - 2.6)
+        brk = [W(0.05, v_start - 1.9), W(0.65, v_start - 2.25), W(1.25, v_start - 2.6)]
+        ax.plot([q[0] for q in brk], [q[1] for q in brk], color=INK, lw=0.6, zorder=7)
+    else:
+        p0, p1 = W(0.65, v_start - n * P.STAIR2_TREAD + 0.4), W(0.65, v_start + 0.4)
+    ax.add_patch(FancyArrowPatch(p0, p1, arrowstyle="-|>", mutation_scale=7, color=INK, lw=0.6, zorder=8))
+    # 防火门：首层向展廊开启，平台层向楼梯间内开启（均为疏散方向）
+    _door_swing(ax, W(0.05, hl), e_r, e_t if level == "ground" else -e_t, 1.1, 8)
+
+
+def _room_label(ax, xy, name, area=None, size=10, color=INK, z=9):
+    ax.text(xy[0], xy[1], name, ha="center", va="center", fontsize=size, color=color, zorder=z)
+    if area is not None:
+        ax.text(xy[0], xy[1] - 1.0, f"{area:.0f} m²", ha="center", va="center", fontsize=size - 2, color=MUTED, zorder=z)
+
+
+def _north(ax, nx, ny, s=1.0):
+    ax.add_patch(MPoly([(nx, ny + 2.6 * s), (nx - 0.9 * s, ny - 0.6 * s), (nx, ny + 0.2 * s), (nx + 0.9 * s, ny - 0.6 * s)],
+                       closed=True, fc=INK, ec="none", zorder=9))
+    ax.text(nx, ny + 3.0 * s, "N", ha="center", va="bottom", fontsize=11, color=INK)
+
+
+def plan_ground(path):
+    """首层平面 +0.85：展廊、门厅、卫生间与储藏、疏散楼梯间、电梯、潮池与坡道起点、疏散路线。"""
+    import structure as ST
+    import program as PG
+    from facade import e1_solid, e1_doors, e2_doors
+    fig = plt.figure(figsize=(12, 12.4), dpi=200, facecolor=PAPER)
+    ax = fig.add_axes([0.02, 0.02, 0.96, 0.9])
+    x0, x1, y0, y1 = -25, 25, -27, 24.5
+    ax.set_xlim(x0, x1); ax.set_ylim(y0, y1); ax.set_aspect("equal"); ax.axis("off")
+    ax.add_patch(MPoly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], closed=True, fc=WATER, ec="none", zorder=0))
+    fill_poly(ax, P.PLINTH_CUT, fc=STONE, ec="#8d877e", lw=0.8, zorder=1)
+    for r_out, r_in, z in P.BASIN_STEPS:
+        ring = Point(0, 0).buffer(r_out, 128).difference(Point(0, 0).buffer(r_in, 128)).difference(P.CHANNEL)
+        fill_poly(ax, ring, fc=WATER_HT if z < P.HIGH_TIDE else "#e6dfd3", ec="#a59e93", lw=0.5, zorder=2)
+    fill_poly(ax, Point(0, 0).buffer(P.BASIN_STEPS[-1][1], 128).union(P.CHANNEL.intersection(P.PLINTH_ALL.buffer(0.4))),
+              fc=WATER_HT, ec="#a59e93", lw=0.5, zorder=2)
+    ax.add_patch(Circle(P.TREE_POS, P.TREE_ISLAND_R, fc="#c9cdb2", ec="#7f8466", lw=0.6, zorder=3))
+    ax.add_patch(Circle(P.SCULPT_POS, 0.95, fc="white", ec=INK, lw=0.6, zorder=3))
+    # 室内地面
+    for g in (P.E1, P.E2):
+        fill_poly(ax, g, fc="#fbf8f2", ec="none", zorder=3)
+    fill_poly(ax, P.SERVICE, fc="#eee8dd", ec="none", zorder=3)
+    # 设备间（基座内，虚线）
+    line_poly(ax, P.PLANT_ROOM, color=MUTED, lw=0.8, ls=(0, (3, 2)), zorder=4)
+    # 坡道（首层以上部分为虚线）
+    th = np.radians(np.linspace(P.RAMP_START_DEG, P.RAMP_START_DEG + 120, 200))
+    for r in (P.RAMP_R - P.RAMP_W / 2, P.RAMP_R + P.RAMP_W / 2):
+        ax.plot(r * np.cos(th), r * np.sin(th), color=INK, lw=0.7, zorder=4)
+        th2 = np.radians(np.linspace(P.RAMP_START_DEG + 120, P.RAMP_START_DEG + 360, 300))
+        ax.plot(r * np.cos(th2), r * np.sin(th2), color=MUTED, lw=0.6, ls=(0, (3, 2)), zorder=4)
+    a0 = math.radians(P.RAMP_START_DEG + 6); a1 = math.radians(P.RAMP_START_DEG + 40)
+    ax.add_patch(FancyArrowPatch((P.RAMP_R * math.cos(a0), P.RAMP_R * math.sin(a0)),
+                                 (P.RAMP_R * math.cos(a1), P.RAMP_R * math.sin(a1)), connectionstyle="arc3,rad=0.12",
+                                 arrowstyle="-|>", mutation_scale=8, color=INK, lw=0.7, zorder=8))
+    # 展墙、接待台
+    for a_, b_, r in ((40, 64, 14.2), (126, 144, 14.0)):
+        ang = np.radians(np.linspace(a_, b_, 40))
+        ax.plot(r * np.cos(ang), r * np.sin(ang), color=MUTED, lw=2.2, solid_capstyle="butt", zorder=5)
+    ang = np.radians(np.linspace(258, 282, 40))
+    ax.plot(12.6 * np.cos(ang), 12.6 * np.sin(ang), color=MUTED, lw=4.0, solid_capstyle="butt", zorder=5)
+    # 围合体
+    _draw_envelope(ax, PG.bay_segments(P.E1, e1_solid, e1_doors))
+    _draw_envelope(ax, PG.bay_segments(P.E2, None, e2_doors))
+    # 卫生间隔墙
+    d, r0, r1, (dr0, dr1) = PG.service_partition()
+    for ra, rb in ((r0, dr0), (dr1, r1)):
+        fill_poly(ax, LineString([d * ra, d * rb]).buffer(0.08, cap_style="flat"), fc=POCHE, ec="none", zorder=6)
+    a = math.radians(P.WC_SPLIT_THETA)
+    dd = np.array([math.cos(a), math.sin(a)])
+    seg = LineString([dd * 5, dd * 30]).intersection(P.E1.buffer(-0.05))
+    qa, qb = np.array(seg.coords[0]), np.array(seg.coords[-1])
+    ax.plot([qa[0], qb[0]], [qa[1], qb[1]], color=POCHE, lw=1.6, zorder=6)
+    # 竖向交通
+    ax.add_patch(Circle(P.CORE_C, P.CORE_R, fc=POCHE, ec="none", zorder=7))
+    ax.add_patch(Circle(P.CORE_C, P.CORE_R - 0.25, fc="white", ec="none", zorder=7))
+    ax.plot([P.CORE_C[0] - 0.55, P.CORE_C[0] + 0.55], [P.CORE_C[1] - 0.55, P.CORE_C[1] + 0.55], color=INK, lw=0.5, zorder=8)
+    ax.plot([P.CORE_C[0] - 0.55, P.CORE_C[0] + 0.55], [P.CORE_C[1] + 0.55, P.CORE_C[1] - 0.55], color=INK, lw=0.5, zorder=8)
+    _stair2_plan(ax, "ground")
+    ax.add_patch(Circle(P.STAIR_C, 1.6, fc="none", ec=INK, lw=0.6, zorder=6))
+    for k in range(16):
+        aa = k * 2 * math.pi / 16
+        ax.plot([P.STAIR_C[0] + 0.35 * math.cos(aa), P.STAIR_C[0] + 1.6 * math.cos(aa)],
+                [P.STAIR_C[1] + 0.35 * math.sin(aa), P.STAIR_C[1] + 1.6 * math.sin(aa)], color=INK, lw=0.35, zorder=6)
+    # 柱、斜柱、石墩
+    allc = np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER, ST.E2_COLS, ST.A_EAST_COLS, ST.C_EXTRA_COLS])
+    ax.scatter(allc[:, 0], allc[:, 1], s=10, color=INK, zorder=8)
+    ax.add_patch(Circle(P.YCOL_BASE, 1.05, fc=STONE_BEYOND, ec=INK, lw=0.6, zorder=6))
+    for q in P.C_PIERS:
+        ax.add_patch(Circle(q, 0.62, fc=STONE_BEYOND, ec=INK, lw=0.6, zorder=6))
+    # 屋顶投影（细虚线）
+    for roof in P.ROOFS:
+        line_poly(ax, roof.poly, color="#9b948a", lw=0.6, ls=(0, (6, 3)), zorder=5)
+    # 疏散：对外门处的出门箭头 + 从最远点沿距离场下降的步行路线
+    eg = PG.ground_egress()
+    for kind, pts, inward in PG.bay_segments(P.E1, e1_solid, e1_doors) + PG.bay_segments(P.E2, None, e2_doors):
+        if kind == "door":
+            m = pts.mean(0)
+            ax.add_patch(FancyArrowPatch(m + inward * 1.2, m - inward * 1.6, arrowstyle="-|>", mutation_scale=10,
+                                         color=SUN, lw=1.5, zorder=9))
+    _egress_paths(ax, eg)
+    ax.add_patch(FancyArrowPatch((0.0, -17.6), (0.0, -24.8), arrowstyle="-|>", mutation_scale=10, color=SUN, lw=1.5,
+                                 zorder=9))
+    # 房间名称
+    rooms = dict((n, a) for n, a, _ in PG.rooms())
+    _room_label(ax, (6.3, 14.9), "展廊", rooms["展廊"], size=12)
+    _room_label(ax, (5.6, -13.7), "门厅", rooms["门厅（含接待）"], size=11)
+    c, e_r, e_t = P.stair2_frame()
+    note_kw = dict(fontsize=10, color=INK, zorder=10)
+
+    def note(xy, txt, xytext, ha="left"):
+        ax.annotate(txt, xy=xy, xytext=xytext, ha=ha, va="center", arrowprops=dict(arrowstyle="-", color=INK, lw=0.6,
+                                                                                    shrinkA=0, shrinkB=2), **note_kw)
+    note(c + e_r * 1.2, "疏散楼梯间（封闭，直达屋面平台）", (-23.5, 21.0))
+    note((P.CORE_C[0], P.CORE_C[1] + P.CORE_R), "电梯（无障碍）", (-1.5, 21.5), ha="center")
+    wc_c = PG.WC.representative_point().coords[0]
+    st_c = PG.STORE.representative_point().coords[0]
+    note(wc_c, "卫生间（含无障碍）", (19.0, 13.5))
+    note(st_c, "储藏 / 设备检修口", (19.5, 9.8))
+    note(P.PLANT_ROOM.representative_point().coords[0], "设备间（基座内，虚线）", (19.5, 17.0))
+    note(P.STAIR_C, "螺旋阶梯 → 观景圆台 +3.00", (-24.0, 5.5))
+    ax.text(0.0, -11.7, "接待", ha="center", va="center", fontsize=9, color=MUTED, zorder=10)
+    a_ = math.radians(P.RAMP_START_DEG + 20)
+    note((P.RAMP_R * math.cos(a_), P.RAMP_R * math.sin(a_)), "1:12 坡道起点", (1.0, 3.6))
+    note(P.YCOL_BASE, "Y 形斜柱石墩", (-23.5, -15.0))
+    note(P.C_PIERS[1], "水中石墩", (21.0, 2.0))
+    ax.text(2.4, -22.5, "栈桥 · 主入口", fontsize=9, color=INK, zorder=10)
+    ax.text(-23.5, -21.0, "→ 疏散：展廊两处庭院门、门厅南门与庭院门，经环形步道至栈桥\n   虚线为距出口最远点的步行路线", fontsize=9,
+            color=SUN, zorder=10)
+    ax.text(-23.5, -23.3, f"任一点到最近对外门：步行 ≤ {eg['walk_max']:.0f} m，直线 ≤ {eg['straight_max']:.0f} m", fontsize=9,
+            color=INK, zorder=10)
+    _north(ax, 22.5, 20.0)
+    scale_bar(ax, -23.5, -26.0, units=(0, 2, 5, 10))
+    fig.text(0.03, 0.955, "首层平面 +0.85", fontsize=18, color=INK)
+    fig.text(0.03, 0.932, "设计高潮位 ±0.00  ·  细虚线为上方屋顶投影  ·  坡道上层各圈为虚线", fontsize=10.5, color=MUTED)
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+def plan_deck(path):
+    """屋面平台平面 +6.30：观景厅、疏散楼梯间、电梯、月洞墙、坡道到达点与两条疏散路线。"""
+    import structure as ST
+    import program as PG
+    from facade import e3_solid, e3_doors
+    fig = plt.figure(figsize=(9.0, 6.45), dpi=260, facecolor=PAPER)
+    ax = fig.add_axes([0.02, 0.02, 0.96, 0.86])
+    x0, x1, y0, y1 = -19, 19, -3.5, 21.5
+    ax.set_xlim(x0, x1); ax.set_ylim(y0, y1); ax.set_aspect("equal"); ax.axis("off")
+    ax.add_patch(MPoly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], closed=True, fc=WATER, ec="none", zorder=0))
+    # 下方：主屋顶 A（不上人屋面）与庭院
+    fill_poly(ax, P.ROOF_A.poly, fc="#e6e0d6", ec="#9b948a", lw=0.7, zorder=1)
+    fill_poly(ax, P.ROOF_C.poly, fc="#ece7de", ec="#b3aba0", lw=0.5, zorder=1)
+    fill_poly(ax, P.DECK_POLY, fc=STONE, ec=INK, lw=0.9, zorder=2)
+    fill_poly(ax, P.E3, fc="#fbf8f2", ec="none", zorder=3)
+    # 坡道到达点与上层坡道
+    land = PG.ramp_landing()
+    fill_poly(ax, land, fc=STONE, ec=INK, lw=0.7, zorder=3)
+    th = np.radians(np.linspace(P.RAMP_END_DEG - 150, P.RAMP_END_DEG - 7.5, 200))
+    for r in (P.RAMP_R - P.RAMP_W / 2, P.RAMP_R + P.RAMP_W / 2):
+        ax.plot(r * np.cos(th), r * np.sin(th), color=INK, lw=0.7, zorder=3)
+    a0 = math.radians(P.RAMP_END_DEG - 60); a1 = math.radians(P.RAMP_END_DEG - 12)
+    ax.add_patch(FancyArrowPatch((P.RAMP_R * math.cos(a0), P.RAMP_R * math.sin(a0)),
+                                 (P.RAMP_R * math.cos(a1), P.RAMP_R * math.sin(a1)), connectionstyle="arc3,rad=0.1",
+                                 arrowstyle="-|>", mutation_scale=8, color=INK, lw=0.7, zorder=8))
+    # 平台栏杆（沿边缘内收 0.25 m）
+    edge = P.DECK_POLY.buffer(-0.25)
+    line_poly(ax, edge, color=GLASS, lw=0.6, zorder=4)
+    # 观景厅、楼梯间、电梯、月洞墙
+    _draw_envelope(ax, PG.bay_segments(P.E3, e3_solid, e3_doors))
+    _stair2_plan(ax, "deck")
+    ax.add_patch(Circle(P.CORE_C, P.CORE_R, fc=POCHE, ec="none", zorder=7))
+    ax.add_patch(Circle(P.CORE_C, P.CORE_R - 0.25, fc="white", ec="none", zorder=7))
+    a = P.MOON_C - P.AXIS_N * P.MOON_HALF; b = P.MOON_C + P.AXIS_N * P.MOON_HALF
+    for p0, p1 in ((a, P.MOON_C - P.AXIS_N * P.MOON_HOLE_R), (P.MOON_C + P.AXIS_N * P.MOON_HOLE_R, b)):
+        fill_poly(ax, LineString([p0, p1]).buffer(0.17, cap_style="flat"), fc=POCHE, ec="none", zorder=7)
+    ga, gb = P.MOON_C - P.AXIS_N * P.MOON_HOLE_R, P.MOON_C + P.AXIS_N * P.MOON_HOLE_R
+    ax.plot([ga[0], gb[0]], [ga[1], gb[1]], color=GLASS, lw=0.8, zorder=7)
+    # 平台家具
+    am = math.radians(38)
+    ax.add_patch(Circle((12.4 * math.cos(am), 12.4 * math.sin(am)), 1.3, fc="none", ec=MUTED, lw=0.6, ls=(0, (2, 2)),
+                        zorder=5))
+    # 次屋顶 B 投影
+    line_poly(ax, P.ROOF_B.poly, color=INK, lw=0.7, ls=(0, (6, 3)), zorder=6)
+    ax.scatter(ST.B_COLS[:, 0], ST.B_COLS[:, 1], s=10, color=INK, zorder=8)
+    # 疏散：从最远点沿距离场下降的步行路线
+    eg = PG.deck_egress()
+    _egress_paths(ax, eg)
+    rooms = dict((n, a) for n, a, _ in PG.rooms())
+
+    def note(xy, txt, xytext, ha="left"):
+        ax.annotate(txt, xy=xy, xytext=xytext, ha=ha, va="center", fontsize=10.5, color=INK, zorder=10,
+                    arrowprops=dict(arrowstyle="-", color=INK, lw=0.6, shrinkA=0, shrinkB=2))
+    _room_label(ax, (-0.2, 11.9), "观景厅", rooms["观景厅"], size=12.5)
+    note((11.0, 8.0), f"屋面平台（室外）{rooms['屋面平台（室外）']:.0f} m²", (10.8, 2.6))
+    note(PG.stair2_door(), "出口 2：疏散楼梯间", (-18.5, 18.5))
+    note(land.centroid.coords[0], "出口 1：坡道到达点", (-6.0, 1.2), ha="right")
+    note(P.CORE_C, "电梯", (6.5, 19.5))
+    note(tuple(P.MOON_C), "月洞墙", (-18.5, 6.0))
+    note((-15.0, 0.0), "主屋顶 A（不上人）", (-18.5, -1.5))
+    note((14.8, 13.6), "次屋顶 B 投影", (14.0, 19.5))
+    ax.text(18.5, -2.6, f"任一点到最近出口：步行 ≤ {eg['walk_max']:.0f} m，直线 ≤ {eg['straight_max']:.0f} m；"
+            f"两出口相距 {eg['exit_gap']:.0f} m", fontsize=10, color=INK, ha="right", zorder=10)
+    _north(ax, 17.0, 15.0, 0.8)
+    scale_bar(ax, -18.5, -2.8, units=(0, 2, 5, 10), h=0.3, label_size=8)
+    fig.text(0.03, 0.94, "屋面平台平面 +6.30", fontsize=16, color=INK)
+    fig.text(0.03, 0.9, "观景厅位于次屋顶 B 之下  ·  两个出口：坡道与疏散楼梯间", fontsize=10.5, color=MUTED)
     fig.savefig(path, facecolor=PAPER)
     plt.close(fig)
 
@@ -485,4 +798,6 @@ if __name__ == "__main__":
     section(os.path.join(out, "section.png"))
     tide_curve(os.path.join(out, "tide_curve.png"))
     support_map(os.path.join(out, "support_map.png"))
+    plan_ground(os.path.join(out, "plan_ground.png"))
+    plan_deck(os.path.join(out, "plan_deck.png"))
     print("diagrams ->", out)

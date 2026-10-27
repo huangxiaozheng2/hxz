@@ -1,7 +1,8 @@
 """立面规则（纯几何）：幕墙分格、实墙段、框景窗、门的位置。build.py 与 structure.py 共用。"""
 import numpy as np
+import shapely
 
-from plan import ccw, resample_ring
+from plan import ccw, resample_ring, STAIR2, WC_THETA
 
 
 def ring_normals(ring):
@@ -54,7 +55,15 @@ def end_caps(which):
     return f
 
 
-e3_solid = end_caps([(40, 66)])          # 二层观景厅东端弧墙：次屋顶的支承之一
+_e3_ends = end_caps([(40, 66)])          # 二层观景厅东端弧墙：次屋顶的支承之一
+
+
+def e3_solid(mp, nrm):
+    """观景厅：东端弧墙 + 与疏散楼梯间相贴的一段（楼梯间墙体即观景厅北墙）。"""
+    nxt = np.roll(mp, -1, 0)
+    mid = (mp + nxt) / 2
+    stair = shapely.distance(STAIR2.exterior, shapely.points(mid)) < 0.3
+    return sorted(_e3_ends(mp, nrm) + ranges_from_mask(stair))
 
 
 def e1_solid(mp, nrm):
@@ -62,7 +71,8 @@ def e1_solid(mp, nrm):
     th = angle_deg(mp)
     o = outer_side(mp, nrm)
     # 西端（螺旋楼梯所在的高厅）保持玻璃，让楼梯从外部可见
-    return ranges_from_mask(((o > 0.35) & (th < 148)) | ((np.abs(o) <= 0.35) & (th < 30)))
+    # 东端尖角为卫生间与储藏：朝庭院一侧也改为实墙
+    return ranges_from_mask(((o > 0.35) & (th < 148)) | ((np.abs(o) <= 0.35) & (th < 30)) | (th < WC_THETA))
 
 
 def e1_windows(mp, nrm):
@@ -101,3 +111,13 @@ def e2_doors(mp, nrm):
     return out
 
 
+def e3_doors(mp, nrm):
+    """观景厅三处门：南侧对坡道到达点，北侧通东平台，西端通月洞平台与疏散楼梯。"""
+    th = angle_deg(mp)
+    o = outer_side(mp, nrm)
+    out = []
+    for side, target in ((o < -0.8, 88.0), (o > 0.8, 64.0), (np.abs(o) < 0.6, 124.0)):
+        cand = np.where(side)[0]
+        if len(cand):
+            out.append(int(cand[np.argmin(np.abs(th[cand] - target))]))
+    return out
