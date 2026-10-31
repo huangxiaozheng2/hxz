@@ -130,8 +130,8 @@ def board1(R, D, out):
     y1 = top + hero_h + G
     pw = (right_w - 2 * G) // 3
     ph = H - M - y1
-    for k, (name, txt) in enumerate((("axis", "日落轴线：夕阳沿水口照进潮池"), ("moon", "月洞框景：冬至夕阳穿洞入室"),
-                                     ("aerial", "鸟瞰：三片月牙环抱潮池"))):
+    for k, (name, txt) in enumerate((("approach", "到达：自湖岸公园经 80 m 栈桥入馆"), ("axis", "日落轴线：夕阳沿水口照进潮池"),
+                                     ("moon", "月洞框景：冬至夕阳穿洞入室"))):
         im.paste(label(cover(shot(R, name), pw, ph), txt, 32), (x0 + k * (pw + G), y1))
     # 左栏：设计说明
     y = top + 6
@@ -162,11 +162,12 @@ def board1(R, D, out):
     for k, v in rows:
         d.text((M, y), k, font=font(34), fill=ACCENT)
         y = para(d, (M + 190, y), v, 34, left_w - 190, lh=1.5) + 18
-    # 沿轴线外景
+    # 区位（设定场地）
     y += 24
     rem = H - M - y
     if rem > 300:
-        im.paste(label(cover(shot(R, 'axis_out'), left_w, rem), "沿日落轴线看水口与 Y 形斜柱", 30), (M, y))
+        loc = trimmed(f"{D}/location.png")
+        im.paste(fit(loc, left_w, rem), (M, y))
     im.save(out, quality=92)
 
 

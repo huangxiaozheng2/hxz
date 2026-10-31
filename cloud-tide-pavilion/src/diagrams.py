@@ -52,14 +52,14 @@ def line_poly(ax, g, **kw):
         ax.plot(x, y, **kw)
 
 
-def scale_bar(ax, x0, y0, units=(0, 5, 10, 20), h=0.5, label_size=9):
+def scale_bar(ax, x0, y0, units=(0, 5, 10, 20), h=0.5, label_size=9, unit_gap=1.0):
     for a, b in zip(units[:-1], units[1:]):
         k = units.index(a)
         ax.add_patch(MPoly([(x0 + a, y0), (x0 + b, y0), (x0 + b, y0 + h), (x0 + a, y0 + h)], closed=True,
                            fc=INK if k % 2 == 0 else "white", ec=INK, lw=0.8))
     for u in units:
         ax.text(x0 + u, y0 - 0.6, f"{u}", ha="center", va="top", fontsize=label_size, color=INK)
-    ax.text(x0 + units[-1] + 1.0, y0 - 0.6, "m", ha="left", va="top", fontsize=label_size, color=INK)
+    ax.text(x0 + units[-1] + unit_gap, y0 - 0.6, "m", ha="left", va="top", fontsize=label_size, color=INK)
 
 
 # ======================================================================= 总平面
@@ -152,6 +152,83 @@ def site_plan(path):
     scale_bar(ax, -33, -28.5)
     fig.text(0.04, 0.955, "总平面 · 冬至日落轴线", fontsize=18, color=INK)
     fig.text(0.04, 0.932, "北纬 30°  ·  图示为设计高潮位  ·  水口、潮池、月洞同指冬至日落方位", fontsize=10.5, color=MUTED)
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+# ======================================================================= 区位
+def location_map(path):
+    """区位（设定场地）：湖面、西南岸湖岸公园与滨水步道、入口广场、栈桥、展馆、湖中小岛、滨湖路与城区。"""
+    fig = plt.figure(figsize=(8.4, 8.4), dpi=220, facecolor=PAPER)
+    ax = fig.add_axes([0.03, 0.03, 0.94, 0.84])
+    x0, x1, y0, y1 = -235, 125, -265, 95
+    ax.set_xlim(x0, x1); ax.set_ylim(y0, y1); ax.set_aspect("equal"); ax.axis("off")
+    ax.add_patch(MPoly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], closed=True, fc=WATER, ec="none", zorder=0))
+    frame = box(x0, y0, x1, y1)
+    edge = LineString(P.SHORE_LINE)
+    land = Polygon(np.vstack([P.SHORE_LINE, [(-400, -420), (260, -420)]])).buffer(0).intersection(frame)
+    from scipy.ndimage import gaussian_filter1d
+    rk = P.resample_open(P.ROAD_KEYS, 2.0)
+    road_line = LineString(np.stack([gaussian_filter1d(rk[:, 0], 8, mode="nearest"),
+                                     gaussian_filter1d(rk[:, 1], 8, mode="nearest")], 1))
+    fill_poly(ax, land, fc="#e6dfd3", ec="none", zorder=1)
+    # 公园（岸线与滨湖路之间）
+    park = land.difference(Polygon(np.vstack([np.asarray(road_line.coords), [(260, -420), (-400, -420)]])).buffer(0))
+    fill_poly(ax, park, fc="#d5dcc2", ec="none", zorder=2)
+    rl = road_line.intersection(frame)
+    for g in ([rl] if rl.geom_type == "LineString" else list(rl.geoms)):
+        x, y = g.xy
+        ax.plot(x, y, color="white", lw=6.5, solid_capstyle="butt", zorder=3)
+        ax.plot(x, y, color="#b8b0a4", lw=0.6, zorder=3)
+    # 城区街坊（示意）
+    rng = np.random.default_rng(4)
+    city = land.difference(park.buffer(12.0)).difference(box(x0, y0, -150, -228))
+    for gx in np.arange(x0, x1, 30):
+        for gy in np.arange(y0, -60, 26):
+            blk = box(gx + 3, gy + 3, gx + 3 + rng.uniform(16, 24), gy + 3 + rng.uniform(13, 19))
+            if city.contains(blk):
+                fill_poly(ax, blk, fc="#d6cec1", ec="none", zorder=3)
+    # 驳岸与滨水步道、入口广场、园路
+    ex, ey = edge.intersection(frame).xy
+    ax.plot(ex, ey, color="#8d877e", lw=1.1, zorder=4)
+    fill_poly(ax, P.PROMENADE.intersection(frame), fc="#f3eee5", ec="none", zorder=4)
+    fill_poly(ax, P.LANDING, fc="#f3eee5", ec="none", zorder=4)
+    fill_poly(ax, P.PARK_PATH.intersection(land), fc="#f3eee5", ec="none", zorder=4)
+    # 湖中小岛
+    for x, y, r in [(-36, -5, 4.5), (-28, -32, 3.2), (32, -26, 4.0), (40, 2, 3.0), (-40, 34, 5.0), (8, 50, 3.6),
+                    (-16, 44, 3.2), (48, -42, 4.0), (-56, -40, 6.5)]:
+        ax.add_patch(Circle((x, y), r, fc="#c9cdb2", ec="#7f8466", lw=0.4, zorder=4))
+    # 展馆与栈桥
+    fill_poly(ax, P.PLINTH_ALL, fc="white", ec=INK, lw=0.6, zorder=5)
+    fill_poly(ax, shapely.unary_union([r.poly for r in P.ROOFS]), fc=POCHE, ec="none", zorder=6)
+    # 冬至日落方向
+    ax.plot([0, P.AXIS[0] * 330], [0, P.AXIS[1] * 330], color=SUN, lw=1.2, ls=(0, (6, 3)), zorder=7)
+    ax.text(*(P.AXIS * 200 + np.array([-2, 11])), "冬至日落方向", color=SUN, fontsize=14, ha="center", zorder=8,
+            rotation=math.degrees(math.atan2(P.AXIS[1], P.AXIS[0])) - 180)
+
+    def note(xy, txt, xytext, ha="left", size=14.5):
+        ax.annotate(txt, xy=xy, xytext=xytext, fontsize=size, color=INK, ha=ha, va="center", zorder=9,
+                    arrowprops=dict(arrowstyle="-", color=INK, lw=0.6, shrinkA=0, shrinkB=2))
+    gap = float(edge.distance(P.PLINTH.buffer(0)))
+    note((6, 10), "云上潮汐馆", (34, 58), size=16)
+    note(tuple(P.BRIDGE_PATH[2]), f"栈桥 约 {LineString(P.resample_open(P.BRIDGE_PATH, 0.4)).length:.0f} m", (-5, -95))
+    note(tuple(P.LANDING_C), "入口广场", (-150, -26), ha="right")
+    note((-112.0, -86.5), "滨水步道", (-222, -42))
+    ax.text(-95, -116, "湖岸公园", fontsize=16, color="#5f6a46", ha="center", zorder=9)
+    q = road_line.interpolate(0.36, normalized=True)
+    ax.text(q.x, q.y - 13, "滨湖路", fontsize=14, color=MUTED, ha="center", zorder=9)
+    ax.text(-150, -238, "城区（设定）", fontsize=16, color=MUTED, ha="center", zorder=9,
+            bbox=dict(fc="#e6dfd3", ec="none", pad=1.5))
+    ax.text(60, 78, "湖面", fontsize=17, color="#5d7f93", ha="center", zorder=9)
+    # 指北针、比例尺
+    nx, ny = 108, 72
+    ax.add_patch(MPoly([(nx, ny + 10), (nx - 3.5, ny - 2.5), (nx, ny + 0.8), (nx + 3.5, ny - 2.5)], closed=True,
+                       fc=INK, ec="none", zorder=9))
+    ax.text(nx, ny + 12, "N", ha="center", va="bottom", fontsize=14, color=INK)
+    scale_bar(ax, -225, 78, units=(0, 25, 50, 100), h=2.6, label_size=12, unit_gap=11.0)
+    fig.text(0.04, 0.95, "区位 · 设定场地", fontsize=24, color=INK)
+    fig.text(0.04, 0.905, f"北纬 30° 湖泊  ·  展馆离岸约 {gap:.0f} m，自西南岸湖岸公园入口广场经栈桥到达",
+             fontsize=13.5, color=MUTED)
     fig.savefig(path, facecolor=PAPER)
     plt.close(fig)
 
@@ -795,6 +872,7 @@ if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(out, exist_ok=True)
     site_plan(os.path.join(out, "plan_axis.png"))
+    location_map(os.path.join(out, "location.png"))
     section(os.path.join(out, "section.png"))
     tide_curve(os.path.join(out, "tide_curve.png"))
     support_map(os.path.join(out, "support_map.png"))

@@ -380,6 +380,31 @@ def _bridge_poly():
 
 
 BRIDGE = _bridge_poly()
+BRIDGE = _bridge_poly()
+
+# 西南岸（设定场地）：湖岸公园。驳岸 + 滨水步道 + 栈桥入口广场；岸线避开冬至日落方向，夕阳仍落在开阔水面上
+SHORE_TOP = FFL                  # 驳岸顶与栈桥、首层同高（高出设计高潮位 0.85 m）
+SHORE_LINE_KEYS = np.array([
+    (230, -250), (150, -212), (80, -175), (20, -128), (-22, -98), (-42, -80), (-50, -67), (-60, -61.5), (-72, -63), (-86, -70),
+    (-110, -82), (-150, -104), (-230, -146), (-330, -196)])
+
+
+def _shore():
+    from scipy.ndimage import gaussian_filter1d
+    line = resample_open(SHORE_LINE_KEYS, 0.8)
+    line = np.stack([gaussian_filter1d(line[:, 0], 5, mode="nearest"), gaussian_filter1d(line[:, 1], 5, mode="nearest")], 1)
+    land = Polygon(np.vstack([line, [(-330, -420), (230, -420)]])).buffer(0)
+    return line, land.intersection(Point(0, 0).buffer(330, 128))
+
+
+SHORE_LINE, SHORE = _shore()
+_edge = LineString(SHORE_LINE)
+PROMENADE = SHORE.intersection(_edge.buffer(7.0)).difference(_edge.buffer(1.0))      # 6 m 宽滨水步道
+LANDING_C = np.array([-61.0, -71.0])                                                 # 栈桥入口广场中心
+LANDING = SHORE.intersection(Point(*LANDING_C).buffer(12.0, 64)).difference(_edge.buffer(1.0))
+PARK_PATH = LineString([(-61, -78), (-63, -95), (-58, -120), (-62, -150)]).buffer(1.6)  # 通往城市道路的园路
+ROAD_KEYS = np.array([(-300, -205), (-200, -160), (-120, -128), (-62, -122), (-10, -150), (60, -195), (150, -245),
+                      (240, -290)])                                                    # 滨湖路（区位图示意）
 
 
 def _c_horn_water(min_clear=2.4):

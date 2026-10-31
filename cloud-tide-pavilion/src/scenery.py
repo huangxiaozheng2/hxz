@@ -383,40 +383,103 @@ def build_deck_furniture(M, parent):
 
 
 # =================================================================== 人物（尺度参照）
-def person_mesh(h=1.72, walk=0.0, seed=0):
-    """简化人物：溜肩躯干、贴身手臂、收脚踝的腿、带颈部的头；局部坐标面朝 +y。"""
+def _ell(buf, c, r, seg=18, rings=10):
+    """椭球：中心 c，半轴 r=(rx, ry, rz)。"""
+    t = np.linspace(0, np.pi, rings)
+    v, f = lathe([(math.sin(a), -math.cos(a)) for a in t], seg)
+    v = v * np.asarray(r) + np.asarray(c)
+    buf.add(v, f)
+
+
+PERSON_KINDS = ("man_shirt", "man_coat", "woman_dress", "woman_trousers", "child")
+
+
+def person_parts(h=1.72, kind="man_shirt", walk=0.0, seed=0):
+    """人物：上衣、下装、鞋、头发、皮肤分开（各自取材质）；局部坐标面朝 +y，脚底 z = 0。
+    walk 0..1 为步幅；站姿时重心略偏一侧、手臂自然下垂。"""
     rng = np.random.default_rng(seed)
-    cloth, skin = MeshBuf(), MeshBuf()
-    stride = 0.16 * h * walk
-    hip = 0.53 * h
-    for sx, sg in ((-0.052 * h, 1), (0.052 * h, -1)):
-        knee = [sx * 0.95, sg * stride * 0.45, 0.285 * h]
-        ankle = [sx * 0.9, sg * stride, 0.045 * h]
-        pts = np.array([[sx, 0, hip], [sx, sg * stride * 0.2, 0.42 * h], knee, ankle])
-        v, f, _ = tube(pts, [0.056 * h, 0.05 * h, 0.038 * h, 0.028 * h], 14)
-        cloth.add(v, f)
-        foot = np.array([[ankle[0], ankle[1] - 0.02 * h, 0.03 * h], [ankle[0], ankle[1] + 0.09 * h, 0.022 * h]])
-        v, f, _ = tube(foot, [0.03 * h, 0.022 * h], 10)
-        cloth.add(v, f)
-    prof = [(0.0, hip - 0.03 * h), (0.098 * h, hip - 0.02 * h), (0.104 * h, hip + 0.04 * h), (0.09 * h, 0.62 * h),
-            (0.102 * h, 0.70 * h), (0.1 * h, 0.745 * h), (0.086 * h, 0.78 * h), (0.058 * h, 0.81 * h),
-            (0.034 * h, 0.828 * h), (0.025 * h, 0.84 * h), (0.0, 0.842 * h)]
-    v, f = lathe(prof, 28)
-    v[:, 1] *= 0.6
-    cloth.add(v, f)
-    for sx, sg in ((-1, -1), (1, 1)):
-        sh = [sx * 0.082 * h, 0, 0.765 * h]
-        el = [sx * 0.112 * h, sg * stride * 0.35 + 0.01 * h, 0.615 * h]
-        hand = [sx * 0.104 * h, sg * stride * 0.65 + 0.025 * h, 0.47 * h]
-        v, f, _ = tube(np.array([sh, el, hand]), [0.029 * h, 0.025 * h, 0.02 * h], 12)
-        cloth.add(v, f)
-    a = np.linspace(0, np.pi, 14)
-    v, f = lathe([(0.058 * h * math.sin(t), 0.928 * h - 0.07 * h * math.cos(t)) for t in a], 24)
-    v[:, 1] *= 0.92
-    skin.add(v, f)
-    v, f = lathe([(0.024 * h, 0.835 * h), (0.024 * h, 0.865 * h)], 16)
-    skin.add(v, f)
-    return cloth, skin
+    P_ = {k: MeshBuf() for k in ("top", "bottom", "shoe", "hair", "skin")}
+    female = kind.startswith("woman")
+    child = kind == "child"
+    w = 1.0 if not female else 0.9                          # 体宽
+    head_k = 1.18 if child else 1.0
+    stride = 0.15 * h * walk
+    sway = 0.0 if walk > 0.3 else rng.uniform(-0.012, 0.012) * h
+    hip_z, knee_z, ank_z = 0.52 * h, 0.285 * h, 0.045 * h
+    dress = kind == "woman_dress"
+    coat = kind == "man_coat"
+    # 腿 + 鞋
+    for side, sg in ((-1, 1), (1, -1)):
+        hx = side * 0.058 * h * w
+        knee = [hx * 0.95 + sway, sg * stride * 0.45, knee_z]
+        ank = [hx * 0.9 + sway, sg * stride, ank_z]
+        pts = np.array([[hx + sway, 0, hip_z], [hx * 0.97 + sway, sg * stride * 0.22, 0.42 * h], knee,
+                        [hx * 0.92 + sway, sg * stride * 0.72, 0.16 * h], ank])
+        if dress:
+            v, f, _ = tube(pts, [0.06 * h, 0.05 * h, 0.04 * h, 0.036 * h, 0.028 * h], 12)
+            P_["skin"].add(v, f)
+        else:
+            v, f, _ = tube(pts, [0.072 * h * w, 0.06 * h * w, 0.047 * h, 0.043 * h, 0.036 * h], 14)
+            P_["bottom"].add(v, f)
+        _ell(P_["shoe"], [ank[0], ank[1] + 0.04 * h, 0.022 * h], [0.03 * h, 0.072 * h, 0.024 * h], 12, 8)
+    # 骨盆 / 裙 / 外套下摆
+    v, f = lathe([(0, 0.47 * h), (0.105 * h * w, 0.48 * h), (0.112 * h * w, 0.53 * h), (0.098 * h * w, 0.6 * h),
+                  (0, 0.6 * h)], 22)
+    v[:, 1] *= 0.68; v[:, 0] += sway
+    P_["bottom" if not coat else "top"].add(v, f)
+    if dress:
+        hem = 0.31 * h
+        v, f = lathe([(0, 0.62 * h), (0.085 * h, 0.62 * h), (0.11 * h, 0.52 * h), (0.15 * h, hem + 0.01 * h),
+                      (0.152 * h, hem), (0, hem)], 26)
+        v[:, 1] *= 0.78; v[:, 0] += sway
+        P_["bottom"].add(v, f)
+    if coat:
+        v, f = lathe([(0, 0.6 * h), (0.1 * h, 0.6 * h), (0.118 * h, 0.48 * h), (0.13 * h, 0.39 * h), (0, 0.39 * h)], 24)
+        v[:, 1] *= 0.72
+        P_["top"].add(v, f)
+    # 躯干（上衣）
+    sh = 0.118 * h * w * (0.85 if child else 1.0)
+    chest = 0.106 * h * w * (1.0 if not female else 0.97)
+    v, f = lathe([(0, 0.555 * h), (0.09 * h * w, 0.555 * h), (0.086 * h * w, 0.62 * h), (chest, 0.70 * h),
+                  (sh, 0.775 * h), (sh * 0.82, 0.805 * h), (0.05 * h, 0.825 * h), (0.034 * h, 0.835 * h), (0, 0.836 * h)], 26)
+    v[:, 1] *= 0.6; v[:, 0] += sway * 0.5
+    P_["top"].add(v, f)
+    # 手臂：袖子 + 手
+    short = kind == "woman_dress" or (kind == "man_shirt" and rng.random() < 0.4)
+    for side, sg in ((-1, -1), (1, 1)):
+        if walk > 0.3:
+            el_y, wr_y = sg * stride * 0.32, sg * stride * 0.6 + 0.02 * h
+        else:
+            el_y, wr_y = 0.005 * h, 0.02 * h
+        shp = [side * sh * 0.92 + sway * 0.5, 0, 0.775 * h]
+        el = [side * (sh + 0.012 * h), el_y, 0.615 * h]
+        wr = [side * (sh + 0.004 * h), wr_y, 0.47 * h]
+        if short:
+            mid = [(shp[i] + el[i]) / 2 for i in range(3)]
+            v, f, _ = tube(np.array([shp, mid]), [0.036 * h, 0.033 * h], 12); P_["top"].add(v, f)
+            v, f, _ = tube(np.array([mid, el, wr]), [0.027 * h, 0.024 * h, 0.02 * h], 10); P_["skin"].add(v, f)
+        else:
+            v, f, _ = tube(np.array([shp, el, wr]), [0.036 * h, 0.031 * h, 0.027 * h], 12); P_["top"].add(v, f)
+        _ell(P_["skin"], [wr[0], wr[1] + 0.004 * h, wr[2] - 0.045 * h], [0.018 * h, 0.024 * h, 0.042 * h], 10, 7)
+    # 颈、头、发
+    v, f = lathe([(0.03 * h, 0.815 * h), (0.028 * h, 0.87 * h)], 14); P_["skin"].add(v, f)
+    hc = np.array([0.0, 0.008 * h, 0.928 * h])
+    hr = np.array([0.049, 0.057, 0.066]) * h * head_k
+    if child:
+        hc[2] = 0.91 * h
+    _ell(P_["skin"], hc, hr, 20, 12)
+    style = rng.integers(0, 3) if (female or child) else 0
+    _ell(P_["hair"], hc + [0, -0.009 * h, 0.012 * h], hr * [1.07, 1.06, 1.03], 20, 12)
+    if female and style == 1:                                 # 披肩发
+        _ell(P_["hair"], hc + [0, -0.03 * h, -0.07 * h], [0.056 * h, 0.032 * h, 0.085 * h], 16, 10)
+    elif female and style == 2:                               # 发髻
+        _ell(P_["hair"], hc + [0, -0.05 * h, 0.035 * h], [0.026 * h] * 3, 12, 8)
+    # 包：部分人背斜挎包
+    if not child and rng.random() < 0.35:
+        side = 1 if rng.random() < 0.5 else -1
+        v, f = box((side * 0.135 * h, -0.01 * h, 0.5 * h), (0.05 * h, 0.16 * h, 0.13 * h))
+        P_["shoe"].add(v, f)
+    return P_
 
 
 def build_people(M, parent):
@@ -440,28 +503,39 @@ def build_people(M, parent):
         spots.append((x, y, P.DECK, fdeg, 0.1))
     for x, y, fdeg in ((5.6, 10.2, 150), (-1.6, 11.4, 105), (-3.5, -12.2, 300), (2.6, -11.6, 120)):
         spots.append((x, y, P.FFL, fdeg, 0.15))
-    bufs = [MeshBuf() for _ in M["people"]]
-    skinb = MeshBuf()
+    # 岸边入口广场、滨水步道、栈桥起点
+    for x, y, fdeg, wk in ((-57.4, -67.6, 42, 1.0), (-55.6, -66.4, 46, 0.9), (-50.5, -62.8, 40, 1.0),
+                           (-63.4, -72.6, 48, 0.1), (-62.6, -73.4, 52, 0.1), (-68.5, -66.4, 30, 0.1),
+                           (-77.5, -70.4, 200, 1.0), (-78.6, -71.0, 205, 0.9), (-44.0, -86.0, 120, 1.0)):
+        spots.append((x, y, P.SHORE_TOP, fdeg, wk))
+    keys = ("top", "bottom", "shoe", "hair", "skin")
+    mats = {"top": M["fabric_tops"], "bottom": M["fabric_bottoms"], "shoe": M["shoes"], "hair": M["hairs"],
+            "skin": M["skins"]}
+    bufs = {(k, i): MeshBuf() for k in keys for i in range(len(mats[k]))}
     for k, (x, y, z, fdeg, walk) in enumerate(spots):
-        h = rng.uniform(1.6, 1.84)
-        cloth, skin = person_mesh(h, walk, seed=k)
+        kind = PERSON_KINDS[int(rng.choice(5, p=[0.27, 0.13, 0.22, 0.28, 0.10]))]
+        h = rng.uniform(1.12, 1.32) if kind == "child" else (
+            rng.uniform(1.58, 1.72) if kind.startswith("woman") else rng.uniform(1.68, 1.86))
+        parts = person_parts(h, kind, walk, seed=k)
         a = math.radians(fdeg - 90)
         Rz = np.array([[math.cos(a), -math.sin(a), 0], [math.sin(a), math.cos(a), 0], [0, 0, 1]])
-        ci = int(rng.integers(0, len(bufs)))
-        for src, dst in ((cloth, bufs[ci]), (skin, skinb)):
+        pick = {key: int(rng.integers(0, len(mats[key]))) for key in keys}
+        if kind == "woman_dress":
+            pick["bottom"] = int(rng.integers(0, len(mats["bottom"])))
+        for key in keys:
+            src = parts[key]
+            if not src.v:
+                continue
             V = np.vstack(src.v) @ Rz.T + [x, y, z]
-            dst.add(V, src.f)
-    for i, b in enumerate(bufs):
-        b.build(f"People_Clothing_{i}", coll, [M["people"][i]], smooth=True)
-    skinb.build("People_Skin", coll, [M["skin"]], smooth=True)
-    return coll
+            bufs[(key, pick[key])].add(V, src.f)
+    for (key, i), b in bufs.items():
+        b.build(f"People_{key.capitalize()}_{i}", coll, [mats[key][i]], smooth=True)
 
 
-# =================================================================== 景观
 def build_landscape(M, parent):
     coll = collection("Landscape", parent)
     # 水面
-    s = 2600
+    s = 20000                    # 足够远：高视点时水面边缘不会在地平线下露出一条暗带
     mesh_object("Water_Surface", [[-s, -s, 0], [s, -s, 0], [s, s, 0], [-s, s, 0]], [[0, 1, 2, 3]], coll,
                 [M["water"]], smooth=False)
     rng = np.random.default_rng(21)
@@ -493,25 +567,129 @@ def build_landscape(M, parent):
             build_pine(f"Islet{k}_Pine{t}", tcoll, M, (p[0], p[1], 0.35), seed=100 + k * 7 + t,
                        height=rng.uniform(3.8, 5.6), trunk_r=0.15, tiers=int(rng.integers(3, 5)), pad=0.95,
                        lean=tuple(rng.normal(0, 0.35, 2)))
-    # 西南岸线（栈桥起点）
-    shore = Polygon([(-140, -150), (-20, -150), (-38, -90), (-52, -70), (-64, -62), (-90, -55), (-140, -50)]).buffer(6)
-    sr = ccw(resample_ring(shore.exterior.coords, 1.0))
-    V2, T = triangulate([sr], 20.0, 20)
-    z = 0.5 + 0.4 * np.clip((-V2[:, 1] - 60) / 40, 0, 1) * 3
-    mesh_object("Shore_Ground", np.c_[V2, z], T, coll, [M["grass"]], smooth=True)
-    nn, _ = ring_normals(sr)
-    v, f, uv = band(sr, -1.4, 0.55, -0.4, 0.3, nn)
-    rock.add(v, f)
-    for t in range(9):
-        p = np.array([-60 - rng.uniform(0, 50), -66 - rng.uniform(0, 40)])
-        if shore.buffer(-3).contains(Point(*p)):
-            build_pine(f"Shore_Pine{t}", tcoll, M, (p[0], p[1], 0.6), seed=300 + t,
-                       height=rng.uniform(5.5, 8.0), trunk_r=0.2, tiers=int(rng.integers(4, 6)), pad=1.15,
-                       lean=tuple(rng.normal(0, 0.25, 2)))
+    build_shore(M, coll, tcoll, rock)
     rock.build("Islets_Rocks", coll, [M["rock"]], smooth=False)
     shrub.build("Islets_Shrubs", coll, [M["groundcover"]], smooth=False)
     build_mountains(M, coll)
     return coll
+
+
+def _fill(poly, z_of, name, coll, mat, area=6.0):
+    """平面多边形（可带洞、可多块）→ 按 z_of(xy) 起伏的三角网。"""
+    parts = [poly] if poly.geom_type == "Polygon" else [g for g in getattr(poly, "geoms", []) if g.geom_type == "Polygon"]
+    V_all, F_all, off = [], [], 0
+    for g in parts:
+        if g.area < 0.5:
+            continue
+        rings = [ccw(resample_ring(g.exterior.coords, 0.8))]
+        holes = []
+        for h in g.interiors:
+            hp = shapely.geometry.Polygon(h)
+            if hp.area < 0.3:
+                continue
+            rings.append(resample_ring(h.coords, 0.8))
+            holes.append(hp.representative_point().coords[0])
+        V2, T = triangulate(rings, area, 20, holes=holes or None)
+        V_all.append(np.c_[V2, z_of(V2)]); F_all.append(T + off); off += len(V2)
+    if V_all:
+        mesh_object(name, np.vstack(V_all), np.vstack(F_all), coll, [mat], smooth=True)
+
+
+def build_shore(M, coll, tcoll, rock):
+    """西南岸湖岸公园（设定场地）：石砌驳岸 + 压顶、6 m 滨水步道、栈桥入口广场、园路、草坡、树丛、坐凳与地灯。"""
+    rng = np.random.default_rng(31)
+    edge = shapely.geometry.LineString(P.SHORE_LINE).intersection(Point(0, 0).buffer(329, 128))
+    edge = max(edge.geoms, key=lambda g: g.length) if edge.geom_type != "LineString" else edge
+
+    def d_edge(V2):
+        return shapely.distance(edge, shapely.points(V2))
+
+    def ground(V2, sink=0.0):
+        d = d_edge(V2)
+        t = np.clip((d - 10) / 60, 0, 1)
+        return P.SHORE_TOP - sink + 1.6 * t * t * (3 - 2 * t)
+    paved = shapely.unary_union([P.PROMENADE, P.LANDING, P.PARK_PATH.intersection(P.SHORE.buffer(-1.0))])
+    _fill(P.SHORE.difference(paved.buffer(0.05)), lambda V: ground(V, 0.04), "Shore_Lawn", coll, M["lawn"], 12.0)
+    _fill(paved, ground, "Shore_Paving", coll, M["paving"], 3.0)
+    # 驳岸：石砌立面（随潮位干湿）+ 压顶
+    pts = np.asarray(edge.coords)
+    t = np.gradient(pts, axis=0); t /= np.linalg.norm(t, axis=1, keepdims=True)
+    nrm = np.stack([t[:, 1], -t[:, 0]], 1)
+    if shapely.contains_xy(P.SHORE, *(pts[len(pts) // 2] + nrm[len(pts) // 2] * 2.0)):
+        nrm = -nrm                                    # 法向指向水面
+    wall, cope = MeshBuf(), MeshBuf()
+    v, f, uv = band(pts, -1.6, P.SHORE_TOP - 0.02, -0.6, 0.0, nrm, closed=False)
+    wall.add(v, f)
+    v, f, uv = band(pts, P.SHORE_TOP - 0.02, P.SHORE_TOP + 0.06, -0.45, 0.08, nrm, closed=False)
+    cope.add(v, f)
+    wall.build("Shore_Revetment", coll, [M["stone_tidal"]], smooth=True)
+    cope.build("Shore_Coping", coll, [M["stone_edge"]], smooth=True)
+    # 步道地灯（每 12 m）与坐凳（每 26 m，朝水）
+    lamps, benches, glow = MeshBuf(), MeshBuf(), MeshBuf()
+    L = edge.length
+    for k, sdist in enumerate(np.arange(4.0, L, 12.0)):
+        q = np.array(edge.interpolate(sdist).coords[0])
+        i = int(np.argmin(np.linalg.norm(pts - q, axis=1)))
+        if np.linalg.norm(q - P.LANDING_C) < 10 or np.linalg.norm(q) > 230:
+            continue
+        c = q - nrm[i] * 6.6
+        v, f = lathe([(0, 0), (0.09, 0), (0.07, 0.04), (0.06, 0.82), (0.075, 0.86), (0, 0.9)], 16,
+                     (c[0], c[1], float(ground(c[None])[0])))
+        lamps.add(v, f)
+        v, f = lathe([(0, 0.70), (0.062, 0.70), (0.062, 0.80), (0, 0.80)], 16, (c[0], c[1], float(ground(c[None])[0])))
+        glow.add(v, f)
+        if k % 2 == 1:
+            b = q - nrm[i] * 5.6 + t[i] * 3.0
+            ang = math.atan2(t[i][1], t[i][0])
+            v, f = box((b[0], b[1], float(ground(b[None])[0]) + 0.22), (1.9, 0.5, 0.44), ang)
+            benches.add(v, f)
+    # 入口广场：环绕广场的坐凳 + 栈桥口的标识石
+    for ang_deg in (200, 250, 300):
+        a_ = math.radians(ang_deg)
+        b = P.LANDING_C + np.array([math.cos(a_), math.sin(a_)]) * 8.6
+        if P.SHORE.buffer(-1.5).contains(Point(*b)):
+            v, f = box((b[0], b[1], P.SHORE_TOP + 0.22), (2.4, 0.55, 0.44), a_ + math.pi / 2)
+            benches.add(v, f)
+    sign = MeshBuf()                                  # 标识石：立在通往城市道路的园路口
+    sp = np.array([-57.6, -79.0])
+    v, f = box((sp[0], sp[1], float(ground(sp[None])[0]) + 1.3), (0.62, 0.16, 2.6), math.radians(80))
+    sign.add(v, f)
+    lamps.build("Shore_BollardLights", coll, [M["metal"]], smooth=True)
+    glow.build("Shore_BollardLights_Glow", coll, [M["led_soft"]], smooth=False)
+    benches.build("Shore_Benches", coll, [M["stone_edge"]], flat_shade=True)
+    sign.build("Shore_EntranceSign", coll, [M["wall"]], flat_shade=True)
+    # 树：广场后方与步道内侧的阔叶树丛，再往里是松
+    placed = []
+
+    def ok(p, gap):
+        return (P.SHORE.buffer(-9.0).contains(Point(*p)) and not paved.buffer(2.2).contains(Point(*p))
+                and all(np.linalg.norm(p - q) > gap for q in placed))
+    # 到达视角两侧的取景树
+    for k, (p, hgt) in enumerate((((-76.5, -79.5), 8.6), ((-71.0, -83.0), 9.4))):
+        p = np.array(p)
+        placed.append(p)
+        build_tree(f"Shore_FrameTree{k}", tcoll, M, (p[0], p[1], float(ground(p[None], 0.04)[0])), seed=480 + k,
+                   height=hgt, trunk_r=0.26, depth=6, spread=1.3, leaf_size=0.15, leaves_per_twig=110, cluster=0.2,
+                   trunk_frac=0.32)
+    tries = 0
+    while len(placed) < 16 and tries < 4000:
+        tries += 1
+        p = P.LANDING_C + rng.normal(0, 1, 2) * [22, 16] + [-4, -14]
+        if ok(p, 6.5):
+            placed.append(p)
+            near = np.linalg.norm(p - P.LANDING_C) < 35
+            build_tree(f"Shore_Tree{len(placed)}", tcoll, M, (p[0], p[1], float(ground(p[None], 0.04)[0])),
+                       seed=500 + len(placed), height=rng.uniform(6.5, 9.5), trunk_r=0.22, depth=6, spread=1.25,
+                       leaf_size=0.15, leaves_per_twig=95 if near else 55, cluster=0.2, trunk_frac=0.32)
+    pines = 0
+    while pines < 10 and tries < 9000:
+        tries += 1
+        p = P.LANDING_C + rng.normal(0, 1, 2) * [45, 30] + [-10, -32]
+        if ok(p, 7.5):
+            placed.append(p); pines += 1
+            build_pine(f"Shore_Pine{pines}", tcoll, M, (p[0], p[1], float(ground(p[None], 0.04)[0])), seed=300 + pines,
+                       height=rng.uniform(6.0, 9.0), trunk_r=0.2, tiers=int(rng.integers(4, 6)), pad=1.15,
+                       lean=tuple(rng.normal(0, 0.25, 2)))
 
 
 def build_mountains(M, coll):

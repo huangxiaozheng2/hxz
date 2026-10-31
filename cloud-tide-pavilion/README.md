@@ -9,10 +9,12 @@
 
 ## 设计说明
 
+**区位与到达。** 设定场地为北纬 30° 的一处湖泊。展馆离西南岸约 67 m，由湖岸公园的入口广场经约 80 m 的栈桥到达。湖岸公园有石砌驳岸、6 m 宽的滨水步道、入口广场与通往滨湖路的园路。岸线刻意避开冬至日落方向，夕阳仍落在开阔水面上。
+
 **潮汐庭院。** 三片月牙屋顶交错环抱一座阶梯式潮池。潮池经西南的水口与外部水面相通，一日两涨两落：设计高潮位 ±0.00 时池水漫至第三级台阶，低潮位 -0.95 时整池露底、留下潮痕。树岛立在池中，磨砂玻璃雕塑立在池底石台上，高潮时下半段没入水中。
 
 **从潮到云。** 参观路线自下而上：
-1. 栈桥 → 低矮门廊 → 门厅 → 视线直达潮池；
+1. 湖岸公园入口广场 → 80 m 栈桥 → 低矮门廊 → 门厅 → 视线直达潮池；
 2. 一层展廊贴近水面，外墙为象牙白实墙，只开四处深框景窗；天光从屋面光缝顺墙洗下；
 3. 1:12 无障碍坡道绕潮池上升约 1.96 圈，到达主屋顶上的屋面平台；
 4. 次屋顶下的观景厅，西端隔着月洞墙看水和天。
@@ -26,6 +28,7 @@
 | 项目 | 数值 |
 |---|---|
 | 室内面积 | 约 397 m²：展廊 233、门厅 60、卫生间 11、储藏 3、疏散楼梯间 20、电梯 4、观景厅 46；另有屋面平台 101 m²、基座内设备间 27 m² |
+| 区位 | 设定场地：北纬 30° 湖泊；离西南岸约 67 m，栈桥约 80 m |
 | 潮位 | 设计高潮位 ±0.00，低潮位 -0.95，潮差 0.95 m |
 | 标高 | 首层 +0.85（高出高潮位 0.85 m），屋面平台 +6.30，主屋顶西翼尖 +11.2 |
 | 潮池 | 四级台阶（+0.55 / +0.25 / -0.05 / -0.35），池底 -0.65；水口净宽 2.6 m |
@@ -98,17 +101,17 @@ cloud-tide-pavilion/
 │   └── cloud_tide_pavilion.glb     建筑主体 + 庭院（简化 PBR 材质，不含远景）
 ├── renders/                        各机位渲染图、分析图（总平面、首层与平台平面、剖面、潮位、支承与抗侧力）、结构轴测图、四张展板 board_01–04.jpg
 └── src/
-    ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房
+    ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥
     ├── facade.py        幕墙分格、实墙段、框景窗与门的位置
     ├── structure.py     结构体系：柱网、承重墙、二层柱、支承距离检查、初步校核、风与抗侧力估算
     ├── program.py       功能与疏散：房间面积、出口、任一点到最近出口的步行与直线距离
     ├── architecture.py  屋顶与天窗、胶合木主次梁、幕墙与框景窗、基座与潮池、平台、坡道、电梯筒、疏散楼梯间、卫生间隔墙、柱 / 环梁 / 斜柱 / 石墩、螺旋楼梯、月洞墙
-    ├── scenery.py       树岛与雕塑、室内陈设与画作射灯、家具、人物、岛屿松树、远山
+    ├── scenery.py       树岛与雕塑、室内陈设与画作射灯、家具、人物（上衣 / 下装 / 鞋 / 头发 / 皮肤分开取材，男女老幼与步态各异）、湖岸公园（驳岸、步道、广场、树丛、地灯、坐凳）、岛屿松树、远山
     ├── materials.py     材质库（统一以 M_ 开头）
     ├── scene.py         天空（物理天空 + 程序化薄云）、灯光、相机（每个机位带曝光和潮位）
     ├── build.py         总装 → .blend
     ├── render.py        渲染指定机位；按相机切换涨潮/落潮水位，dusk 机位切换为黄昏
-    ├── diagrams.py      总平面与日落轴线、首层与屋面平台平面（含疏散路线）、沿轴线长剖面、潮位曲线、支承距离与抗侧力图
+    ├── diagrams.py      区位图、总平面与日落轴线、首层与屋面平台平面（含疏散路线）、沿轴线长剖面、潮位曲线、支承距离与抗侧力图
     ├── struct_axo.py    结构轴测图（屋面半透明，承重构件着色）与标注锚点
     ├── boards.py        四张 A1 展板排版（概念、技术、平面与流线、结构）
     └── export_glb.py    导出 GLB
@@ -124,9 +127,9 @@ CloudTidePavilion
 │   ├── Plinth_Terraces  Plinth_And_Bridge、Courtyard_TidalBasin、Roof_Terrace_Deck、Terrace_MoonGate
 │   ├── Structure        Structure_LiftCore、Structure_EgressStair（EgressStair_Walls / Flights / FireDoors）、Structure_Supports（Supports_Columns / RingBeams_Steel / YStrut_Steel / StonePiers）
 │   └── Circulation      Courtyard_Ramp、Hall_SpiralStair
-├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures、Landscape
+├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures、Landscape（Water_Surface、Shore_*、Islets、Mountains_*）
 ├── Lights
-└── Cameras              Cam_hero / axis / axis_out / moon / court_ht / court_lt / aerial / interior / gallery / terrace / stair / structure / detail / dusk
+└── Cameras              Cam_hero / approach / arrival / axis / axis_out / moon / court_ht / court_lt / aerial / interior / gallery / terrace / stair / structure / detail / dusk
 ```
 
 ## 重新生成
@@ -135,7 +138,7 @@ CloudTidePavilion
 python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib
 cd cloud-tide-pavilion
 ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend
-../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders hero,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
+../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders hero,approach,arrival,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
 ../venv/bin/python src/struct_axo.py model/cloud_tide_pavilion.blend renders/struct_axo.png --samples=64
 ../venv/bin/python src/diagrams.py renders
 ../venv/bin/python src/boards.py renders renders renders

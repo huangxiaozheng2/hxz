@@ -319,6 +319,39 @@ def painting(name, seed=0.0):
     return m
 
 
+def fabric(name, color, sheen=0.35, rough=0.88):
+    """织物：高粗糙度 + 柔和光泽边缘。"""
+    m = flat(name, color, rough=rough, spec=0.3)
+    b = next(n for n in m.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled")
+    if "Sheen Weight" in b.inputs:
+        b.inputs["Sheen Weight"].default_value = sheen
+        b.inputs["Sheen Roughness"].default_value = 0.5
+    return m
+
+
+def lawn(name="M_Lawn"):
+    """草坪：两种绿色的大尺度斑驳 + 细碎明暗与微凹凸。"""
+    m = _new(name); t = NT(m)
+    tc = t.n("ShaderNodeTexCoord", (-900, 0))
+    big = t.n("ShaderNodeTexNoise", (-650, 200), **{"Scale": 0.08, "Detail": 4.0, "Roughness": 0.55})
+    t.link(tc.outputs["Object"], big.inputs["Vector"])
+    fine = t.n("ShaderNodeTexNoise", (-650, -150), **{"Scale": 9.0, "Detail": 8.0, "Roughness": 0.7})
+    t.link(tc.outputs["Object"], fine.inputs["Vector"])
+    ramp = t.n("ShaderNodeValToRGB", (-400, 200))
+    ramp.color_ramp.elements[0].color = (0.12, 0.17, 0.06, 1)
+    ramp.color_ramp.elements[1].color = (0.33, 0.35, 0.13, 1)
+    mixv = t.math("ADD", t.math("MULTIPLY", big.outputs["Fac"], 0.75), t.math("MULTIPLY", fine.outputs["Fac"], 0.25))
+    t.link(mixv, ramp.inputs["Fac"])
+    bump = t.n("ShaderNodeBump", (200, -300), **{"Strength": 0.25, "Distance": 0.02})
+    t.link(fine.outputs["Fac"], bump.inputs["Height"])
+    b = t.bsdf(**{"Roughness": 0.92, "Specular IOR Level": 0.25})
+    t.link(ramp.outputs["Color"], b.inputs["Base Color"])
+    t.link(bump.outputs["Normal"], b.inputs["Normal"])
+    t.link(b.outputs[0], t.out.inputs[0])
+    m.diffuse_color = (0.17, 0.21, 0.08, 1)
+    return m
+
+
 def tidal_stone(name="M_Stone_Tidal", color=(0.70, 0.675, 0.63, 1), tide=0.0):
     """潮池石材：设计高潮位以下颜色加深、表面湿润，近池底泛出极淡的青褐色——落潮后留下潮痕。"""
     m = _new(name); t = NT(m)
@@ -382,6 +415,8 @@ def build_library():
     L["groundcover"] = leaf("M_GroundCover", (0.12, 0.20, 0.08, 1), (0.25, 0.33, 0.13, 1))
     L["rock"] = ivory_mineral("M_Rock", (0.15, 0.14, 0.125, 1), rough=0.85, scale=0.2)
     L["grass"] = flat("M_Island_Grass", (0.16, 0.20, 0.09, 1), rough=0.95)
+    L["lawn"] = lawn()
+    L["paving"] = stone_floor("M_Paving_Granite", (0.37, 0.345, 0.31, 1), ring=0.9, seg=0.9, polish=0.86)
     L["mountain"] = distance_haze("M_Mountain_Haze", (0.20, 0.24, 0.27, 1), (0.80, 0.70, 0.66, 1))
     L["mountain_far"] = distance_haze("M_Mountain_Far", (0.32, 0.34, 0.38, 1), (0.82, 0.72, 0.68, 1),
                                       near=150, far=1300)
@@ -390,10 +425,18 @@ def build_library():
     L["plinth"] = flat("M_Plinth_Shadow", (0.13, 0.13, 0.13, 1), rough=0.8)
     L["stone_tidal"] = tidal_stone()
     L["bronze_satin"] = flat("M_Bronze_Satin", (0.42, 0.33, 0.24, 1), rough=0.38, metallic=1.0)
-    L["people"] = [flat(f"M_People_{k}", c, rough=0.8, spec=0.3) for k, c in enumerate((
-        (0.08, 0.09, 0.11, 1), (0.72, 0.68, 0.60, 1), (0.30, 0.32, 0.36, 1), (0.85, 0.84, 0.80, 1),
-        (0.45, 0.30, 0.22, 1), (0.16, 0.22, 0.30, 1)))]
-    L["skin"] = flat("M_People_Skin", (0.62, 0.46, 0.36, 1), rough=0.6, spec=0.4)
+    L["fabric_tops"] = [fabric(f"M_People_Top_{k}", c) for k, c in enumerate((
+        (0.80, 0.78, 0.74, 1), (0.06, 0.08, 0.14, 1), (0.60, 0.50, 0.36, 1), (0.03, 0.03, 0.035, 1),
+        (0.23, 0.24, 0.14, 1), (0.44, 0.17, 0.08, 1), (0.42, 0.52, 0.63, 1), (0.36, 0.36, 0.37, 1)))]
+    L["fabric_bottoms"] = [fabric(f"M_People_Bottom_{k}", c) for k, c in enumerate((
+        (0.06, 0.08, 0.12, 1), (0.03, 0.03, 0.033, 1), (0.46, 0.40, 0.28, 1), (0.23, 0.23, 0.24, 1),
+        (0.72, 0.68, 0.59, 1), (0.30, 0.12, 0.10, 1)))]
+    L["shoes"] = [flat(f"M_People_Shoe_{k}", c, rough=0.55, spec=0.4) for k, c in enumerate((
+        (0.03, 0.028, 0.026, 1), (0.82, 0.80, 0.77, 1), (0.17, 0.10, 0.055, 1)))]
+    L["hairs"] = [flat(f"M_People_Hair_{k}", c, rough=0.5, spec=0.45) for k, c in enumerate((
+        (0.018, 0.016, 0.014, 1), (0.06, 0.04, 0.028, 1), (0.15, 0.095, 0.055, 1), (0.42, 0.41, 0.39, 1)))]
+    L["skins"] = [flat(f"M_People_Skin_{k}", c, rough=0.58, spec=0.4) for k, c in enumerate((
+        (0.74, 0.56, 0.45, 1), (0.62, 0.46, 0.36, 1), (0.52, 0.36, 0.26, 1), (0.36, 0.24, 0.17, 1)))]
     L["art"] = [painting(f"M_Art_{i}", seed=i * 3.7) for i in range(4)]
     L["frame"] = flat("M_ArtFrame", (0.10, 0.09, 0.08, 1), rough=0.4)
     return L
