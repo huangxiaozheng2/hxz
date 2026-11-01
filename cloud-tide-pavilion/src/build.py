@@ -50,6 +50,7 @@ def main(out_path, lite=False):
 
     struct = collection("Structure", arch)
     A.build_plinth(P.PLINTH_CUT, P.FFL, M, base, name="Plinth_And_Bridge", cut=P.WATER_CUT)
+    A.build_edge_railings(M, base)
     A.build_tidal_basin(M, base)
     A.build_deck(M, base)
     A.build_moon_gate(M, base)

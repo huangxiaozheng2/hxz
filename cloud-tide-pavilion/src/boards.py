@@ -1,4 +1,4 @@
-"""竞赛展板排版（A1 横版 ×4）。用法：python boards.py 渲染目录 分析图目录 输出目录"""
+"""竞赛展板排版（A1 横版 ×6）。用法：python boards.py 渲染目录 分析图目录 输出目录"""
 import os
 import sys
 
@@ -118,7 +118,7 @@ def trimmed(path, pad=30):
 def board1(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 04  概念与形象")
+    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 06  概念与形象")
     top = 290
     left_w = 1060
     x0 = M + left_w + 70
@@ -174,7 +174,7 @@ def board1(R, D, out):
 def board2(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 04  技术与细部")
+    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 06  技术与细部")
     top = 290
     # 第一行：总平面 + 长剖面
     row1_h = 1180
@@ -276,7 +276,7 @@ def board4(R, D, out):
     import structure as ST
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  抗侧力  ·  初步校核", "04 / 04  结构")
+    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  抗侧力  ·  初步校核", "04 / 06  结构")
     top = 290
     left_w = 2560
     sm = trimmed(f"{D}/support_map.png")
@@ -363,7 +363,7 @@ def board3(R, D, out):
     import program as PG
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "平面  ·  功能  ·  疏散与无障碍", "03 / 04  平面与流线")
+    header(d, "云上潮汐馆", "平面  ·  功能  ·  疏散与无障碍", "03 / 06  平面与流线")
     top = 290
     avail = H - M - top
     gp = trimmed(f"{D}/plan_ground.png")
@@ -405,6 +405,55 @@ def board3(R, D, out):
     im.save(out, quality=92)
 
 
+def board5(R, D, out):
+    """生成与环境：上为形体生成四步，下为环境策略剖面（图例在图内），两图通栏。"""
+    im = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(im)
+    header(d, "云上潮汐馆", "形体生成  ·  环境策略", "05 / 06  生成与环境")
+    top = 290
+    form = trimmed(f"{D}/form.png")
+    env = trimmed(f"{D}/environment.png")
+    cw = W - 2 * M
+    avail = H - M - top - 2 * G
+    k = min(1.0, avail / (cw * form.height / form.width + cw * env.height / env.width))
+    w = int(cw * k)
+    hf, he = int(w * form.height / form.width), int(w * env.height / env.width)
+    gap = max(G, H - M - top - hf - he)
+    x = M + (cw - w) // 2
+    im.paste(fit(form, w, hf), (x, top))
+    d.line([(M, top + hf + gap // 2), (W - M, top + hf + gap // 2)], fill=(214, 207, 197), width=2)
+    im.paste(fit(env, w, he), (x, top + hf + gap))
+    im.save(out, quality=92)
+
+
+def board6(R, D, out):
+    """立面 · 剖面 · 构造：左栏南立面与 2-2 剖面，右栏 1:20 檐口节点。"""
+    im = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(im)
+    header(d, "云上潮汐馆", "南立面  ·  2-2 剖面  ·  檐口节点 1:20", "06 / 06  立面与构造")
+    top = 290
+    elev = trimmed(f"{D}/elevation_south.png")
+    sec = trimmed(f"{D}/section_2.png")
+    det = trimmed(f"{D}/detail_eave.png")
+    avail = H - M - top
+    right_w = 1460
+    left_w = W - 2 * M - right_w - 70
+    he = int(left_w * elev.height / elev.width)
+    hs = int(left_w * sec.height / sec.width)
+    if he + hs + G > avail:
+        k = (avail - G) / (he + hs)
+        he, hs = int(he * k), int(hs * k)
+    gap = max(G, avail - he - hs)
+    im.paste(fit(elev, left_w, he), (M, top))
+    d.line([(M, top + he + gap // 2), (M + left_w, top + he + gap // 2)], fill=(214, 207, 197), width=2)
+    im.paste(fit(sec, left_w, hs), (M, top + he + gap))
+    x0 = M + left_w + 70
+    d.line([(x0 - 35, top), (x0 - 35, H - M)], fill=(214, 207, 197), width=2)
+    hd = min(int(right_w * det.height / det.width), avail)
+    im.paste(fit(det, right_w, hd), (x0, top + (avail - hd) // 2))
+    im.save(out, quality=92)
+
+
 if __name__ == "__main__":
     R, D, O = sys.argv[1], sys.argv[2], sys.argv[3]
     os.makedirs(O, exist_ok=True)
@@ -412,4 +461,7 @@ if __name__ == "__main__":
     board2(R, D, os.path.join(O, "board_02.jpg"))
     board3(R, D, os.path.join(O, "board_03.jpg"))
     board4(R, D, os.path.join(O, "board_04.jpg"))
+    board5(R, D, os.path.join(O, "board_05.jpg"))
+    if os.path.exists(f"{D}/elevation_south.png"):
+        board6(R, D, os.path.join(O, "board_06.jpg"))
     print("boards ->", O)

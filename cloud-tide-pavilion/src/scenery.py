@@ -654,6 +654,13 @@ def build_shore(M, coll, tcoll, rock):
     sp = np.array([-57.6, -79.0])
     v, f = box((sp[0], sp[1], float(ground(sp[None])[0]) + 1.3), (0.62, 0.16, 2.6), math.radians(80))
     sign.add(v, f)
+    # 步道临水边的玻璃栏板（与栈桥、平台同一做法），栈桥接岸处留口
+    from architecture import shore_railing_paths, balustrade
+    rg, rm = MeshBuf(), MeshBuf()
+    for pts_r in shore_railing_paths():
+        balustrade(rg, rm, pts_r, P.SHORE_TOP, height=1.05, panel=1.5)
+    rg.build("Shore_Balustrade_Glass", coll, [M["glass_rail"]], smooth=False)
+    rm.build("Shore_Balustrade_Rail", coll, [M["metal"]], smooth=True)
     lamps.build("Shore_BollardLights", coll, [M["metal"]], smooth=True)
     glow.build("Shore_BollardLights_Glow", coll, [M["led_soft"]], smooth=False)
     benches.build("Shore_Benches", coll, [M["stone_edge"]], flat_shade=True)

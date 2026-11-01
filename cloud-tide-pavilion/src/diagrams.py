@@ -7,6 +7,7 @@ import sys
 
 import numpy as np
 import shapely
+import shapely.ops
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -16,6 +17,7 @@ from shapely.geometry import Point, box, LineString, Polygon
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan as P  # noqa: E402
+from plan import ccw, resample_ring  # noqa: E402
 
 FONT = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
 font_manager.fontManager.addfont(FONT)
@@ -450,7 +452,723 @@ def section(path):
     plt.close(fig)
 
 
+# ======================================================================= 2-2 横剖面
+SEC2_DEG = 105.0                                   # 剖切线方位：疏散楼梯间中心线（北）—门厅（南）
+
+
+def _sec2_frame():
+    a = math.radians(SEC2_DEG)
+    D = np.array([math.cos(a), math.sin(a)])       # 剖切线方向（指向北侧展廊）
+    W = np.array([-math.sin(a), -math.cos(a)]) if False else np.array([D[1], -D[0]]) * -1
+    return D, W                                    # W：看向剖切面后方（西侧）
+
+
+def _cut_crossings(poly, D, s0=-30, s1=30):
+    """剖切线与多边形边界的交点（沿 s 的位置）。"""
+    line = LineString([D * s0, D * s1])
+    inter = line.intersection(poly.boundary)
+    pts = [inter] if inter.geom_type == "Point" else list(getattr(inter, "geoms", []))
+    return sorted(float(np.dot([p.x, p.y], D)) for p in pts if p.geom_type == "Point")
+
+
+def _bay_kind(poly, q, solid_fn, doors_fn=None):
+    """边界上一点 q 属于实墙、门还是玻璃。"""
+    import program as PG
+    segs = PG.bay_segments(poly, solid_fn, doors_fn)
+    best = min(segs, key=lambda sg: LineString(sg[1]).distance(Point(*q)))
+    return best[0]
+
+
+def section_cross(path, env=False):
+    """2-2 剖面：南侧门厅—潮池与坡道—展廊—疏散楼梯间—屋面平台与观景厅—北侧临水边。
+    env=True 时以浅灰为底，叠加环境策略（遮阳、通风、地源 / 湖水源热泵、雨水、天光）。"""
+    import structure as ST
+    from facade import e1_solid, e1_doors, e2_doors, e3_solid, e3_doors
+    D, W = _sec2_frame()
+    s0, s1 = -27.0, 27.0
+    sv = np.arange(s0, s1, 0.02)
+    xy = D[None] * sv[:, None]
+    poche = "#8c8780" if env else POCHE
+    oak = "#cbb59a" if env else OAK
+    fig = plt.figure(figsize=(16, 7.6), dpi=200, facecolor=PAPER)
+    ax = fig.add_axes([0.03, 0.06, 0.94, 0.8])
+    ax.set_xlim(s0, s1); ax.set_ylim(-2.3, 14.2); ax.set_aspect("equal"); ax.axis("off")
+    ax.fill_between(sv, -2.3, P.HIGH_TIDE, color=WATER_HT, lw=0, zorder=0)
+    ax.plot(sv, np.zeros_like(sv), color="#5d7f93", lw=0.9, zorder=1)
+    ax.plot(sv, np.full_like(sv, P.LOW_TIDE), color="#5d7f93", lw=0.9, ls=(0, (5, 3)), zorder=6)
+    beyond_sign = 1.0
+
+    def nb(p):                                     # 到剖切面的距离（>0 在剖切面后）
+        return float(np.dot(p, W)) * beyond_sign
+    # 剖切面后的屋顶轮廓
+    for roof in P.ROOFS:
+        minx, miny, maxx, maxy = roof.poly.bounds
+        X, Y = np.meshgrid(np.arange(minx, maxx, 0.15), np.arange(miny, maxy, 0.15))
+        X, Y = X.ravel(), Y.ravel()
+        m = shapely.contains_xy(roof.poly, X, Y) & ((X * W[0] + Y * W[1]) > 0)
+        X, Y = X[m], Y[m]
+        dd = roof.dist_edge(X, Y)
+        top, bot = roof.surfaces(X, Y, dd)
+        und_ = bot - roof.beam_depth(dd)
+        svv = X * D[0] + Y * D[1]
+        bins = np.round(svv / 0.1).astype(int)
+        ub = np.unique(bins)
+        lo = np.array([und_[bins == b].min() for b in ub]); hi = np.array([top[bins == b].max() for b in ub])
+        xs_ = ub * 0.1
+        gaps = np.where(np.diff(ub) > 2)[0] + 1
+        for seg in np.split(np.arange(len(ub)), gaps):
+            ax.fill_between(xs_[seg], lo[seg], hi[seg], color="#e8e2d8", ec="#cdc5b9", lw=0.6, zorder=1.5)
+    # 剖切面后：月洞墙（带圆洞）、树岛、雕塑
+    ms = float(np.dot(P.MOON_C, D))
+    wl = np.array([P.MOON_C - P.AXIS_N * P.MOON_HALF, P.MOON_C + P.AXIS_N * P.MOON_HALF]) @ D
+    zt = float(P.ROOF_B.underside(np.array([P.MOON_C[0]]), np.array([P.MOON_C[1]]))[0])
+    ax.add_patch(MPoly([(wl.min(), P.DECK), (wl.max(), P.DECK), (wl.max(), zt), (wl.min(), zt)], closed=True,
+                       fc=STONE_BEYOND, ec="#9b948a", lw=0.6, zorder=1.7))
+    hr = P.MOON_HOLE_R * abs(float(np.dot(P.AXIS_N, D)))
+    ax.add_patch(matplotlib.patches.Ellipse((ms, P.DECK + 0.5 + 1.1), 2 * hr, 2 * 1.1, fc=PAPER, ec="#9b948a", lw=0.6,
+                                            zorder=1.8))
+    ts = float(np.dot(P.TREE_POS, D))
+    ax.add_patch(MPoly([(ts - P.TREE_ISLAND_R, P.BASIN_FLOOR), (ts + P.TREE_ISLAND_R, P.BASIN_FLOOR),
+                        (ts + P.TREE_ISLAND_R, P.FFL + 0.45), (ts - P.TREE_ISLAND_R, P.FFL + 0.45)], closed=True,
+                       fc=STONE_BEYOND, ec="#9b948a", lw=0.6, zorder=2))
+    ax.plot([ts, ts - 0.3, ts - 0.1], [P.FFL + 0.33, 3.6, 4.6], color="#7a6a58", lw=3, zorder=2)
+    ax.add_patch(matplotlib.patches.Ellipse((ts - 0.2, 6.2), 6.6, 4.0, fc="#c3c7a4", ec="none", alpha=0.75, zorder=2))
+    scs = float(np.dot(P.SCULPT_POS, D))
+    ax.add_patch(matplotlib.patches.Ellipse((scs, -0.40 + 1.05), 1.6, 2.0, fc="none", ec="#8aa3b0", lw=2.2, zorder=2))
+    # 剖切面后 10 m 内的柱（立面）
+    for c in np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER, ST.E2_COLS, ST.C_EXTRA_COLS]):
+        n_ = nb(c)
+        if 0.3 < n_ < 10:
+            roof = P.ROOF_C if any(np.allclose(c, q) for q in np.vstack([ST.E2_COLS, ST.C_EXTRA_COLS])) else P.ROOF_A
+            ax.plot([np.dot(c, D)] * 2, [P.FFL, float(roof.underside(np.array([c[0]]), np.array([c[1]]))[0])],
+                    color="#958d82", lw=1.2, zorder=2.5)
+    for c in ST.B_COLS:
+        n_ = nb(c)
+        if 0.3 < n_ < 10:
+            ax.plot([np.dot(c, D)] * 2, [P.DECK, float(P.ROOF_B.underside(np.array([c[0]]), np.array([c[1]]))[0])],
+                    color="#958d82", lw=1.2, zorder=2.5)
+    # 基座与潮池（剖切）
+    r = np.abs(sv)
+    zg = np.full_like(sv, np.nan)
+    plinth = shapely.contains_xy(P.PLINTH_CUT, xy[:, 0], xy[:, 1])
+    zg[plinth] = P.FFL
+    for r_out, r_in, z in P.BASIN_STEPS:
+        zg[(r < r_out) & (r >= r_in)] = z
+    zg[(r < P.BASIN_STEPS[-1][1])] = P.BASIN_FLOOR
+    solid = ~np.isnan(zg)
+    ax.fill_between(sv, -1.7, np.where(solid, zg, -1.7), where=solid, color=poche, lw=0, zorder=4)
+    # 屋顶（剖切）与胶合木梁
+    cuts = {}
+    for roof in P.ROOFS:
+        ins = shapely.contains_xy(roof.poly, xy[:, 0], xy[:, 1])
+        if not ins.any():
+            continue
+        dd = roof.dist_edge(xy[ins, 0], xy[ins, 1])
+        top, bot = roof.surfaces(xy[ins, 0], xy[ins, 1], dd)
+        T = np.full_like(sv, np.nan); B = np.full_like(sv, np.nan); U = np.full_like(sv, np.nan)
+        T[ins] = top; B[ins] = bot; U[ins] = bot - roof.beam_depth(dd)
+        ax.fill_between(sv, B, T, where=ins, color=poche, lw=0, zorder=5)
+        ax.fill_between(sv, U, B, where=ins, color=oak, lw=0, zorder=5)
+        cuts[roof.name] = (sv[ins], T[ins], U[ins])
+    deck = shapely.contains_xy(P.DECK_POLY, xy[:, 0], xy[:, 1])
+    a_top, _ = P.ROOF_A.surfaces(xy[:, 0], xy[:, 1])
+    ax.fill_between(sv, np.minimum(a_top, P.DECK - 0.2), P.DECK, where=deck, color=poche, lw=0, zorder=5)
+    # 屋面光缝（剖到处开口，顶部为玻璃）
+    sky = []
+    for sk in P.SKYLIGHTS:
+        it = LineString([D * s0, D * s1]).intersection(sk)
+        if it.is_empty:
+            continue
+        cs = np.asarray(it.coords) @ D
+        a_, b_ = float(cs.min()), float(cs.max())
+        m_ = (sv >= a_) & (sv <= b_)
+        top_a, bot_a = P.ROOF_A.surfaces(xy[m_, 0], xy[m_, 1])
+        ax.fill_between(sv[m_], bot_a - 0.6, top_a + 0.02, color=PAPER, lw=0, zorder=5.2)
+        ax.plot(sv[m_], top_a + 0.02, color=GLASS, lw=1.2, zorder=5.3)
+        sky.append((a_, b_))
+    # 平台栏杆、首层临水栏杆
+    for q_s in _cut_crossings(P.DECK_POLY.buffer(-0.25), D):
+        q = D * q_s
+        if not P.E3.buffer(0.4).contains(Point(*q)):
+            ax.plot([q_s, q_s], [P.DECK, P.DECK + 1.05], color=GLASS, lw=1.0, zorder=6)
+    for q_s in _cut_crossings(P.PLINTH_CUT.buffer(-0.25), D):
+        q = D * q_s
+        if not P.WATER_CUT.buffer(0.6).contains(Point(*q)) and abs(q_s) > 8:
+            ax.plot([q_s, q_s], [P.FFL, P.FFL + 1.05], color=GLASS, lw=1.0, zorder=6)
+    # 围合体（剖切）：实墙涂黑，玻璃细线
+    for poly, roof, z0, sfn, dfn in ((P.E1, P.ROOF_A, P.FFL, e1_solid, e1_doors), (P.E2, P.ROOF_C, P.FFL, None, e2_doors),
+                                     (P.E3, P.ROOF_B, P.DECK, e3_solid, e3_doors)):
+        for q_s in _cut_crossings(poly, D):
+            q = D * q_s
+            zt = float(roof.underside(np.array([q[0]]), np.array([q[1]]))[0])
+            kind = _bay_kind(poly, q, sfn, dfn) if sfn else "glass"
+            if kind == "solid":
+                ax.add_patch(MPoly([(q_s - 0.17, z0), (q_s + 0.17, z0), (q_s + 0.17, zt), (q_s - 0.17, zt)], closed=True,
+                                   fc=poche, ec="none", zorder=6))
+            else:
+                for off in (-0.04, 0.04):
+                    ax.plot([q_s + off] * 2, [z0, zt], color=GLASS, lw=0.9, zorder=6)
+    # 疏散楼梯间（剖切）：墙、两跑梯段的剖面，平台层平台在剖切面后
+    c2, e_r, e_t = P.stair2_frame()
+    s_c = float(np.dot(c2, D))
+    hd, t = (P.STAIR2_R_OUT - P.STAIR2_R_IN) / 2, P.STAIR2_WALL
+    z_st = float(np.min(P.ROOF_B.underside(*np.array(P.STAIR2.exterior.coords)[:-1].T))) - 0.03
+    for a_, b_ in ((-hd, -hd + t), (hd - t, hd)):
+        ax.add_patch(MPoly([(s_c + a_, P.FFL), (s_c + b_, P.FFL), (s_c + b_, z_st), (s_c + a_, z_st)], closed=True,
+                           fc=poche, ec="none", zorder=6))
+    ax.add_patch(MPoly([(s_c - hd, z_st), (s_c + hd, z_st), (s_c + hd, z_st + 0.18), (s_c - hd, z_st + 0.18)],
+                       closed=True, fc=poche, ec="none", zorder=6))
+    r1 = P.STAIR2_RISER
+    for (u0, u1), zc in (((-hd + t, -0.05), P.FFL + 0.5 * 16 * r1 * (2.05 / 4.05) * 2), ((0.05, hd - t), P.FFL + 16 * r1 + (2.0 / 4.05) * 15 * r1)):
+        ax.add_patch(MPoly([(s_c + u0, zc - 0.3), (s_c + u1, zc - 0.3), (s_c + u1, zc), (s_c + u0, zc)], closed=True,
+                           fc=poche, ec="none", zorder=6))
+    ax.plot([s_c - hd + t, s_c + hd - t], [P.DECK, P.DECK], color="#958d82", lw=1.2, zorder=5.5)
+    for k in range(9):                                     # 剖切面后的梯段（踏步线）
+        z_ = P.FFL + k * r1
+        ax.plot([s_c - hd + t, s_c - 0.05], [z_, z_], color="#b3aba0", lw=0.6, zorder=5.5)
+        z2 = P.FFL + 16 * r1 + (8 + k) * r1
+        ax.plot([s_c + 0.05, s_c + hd - t], [z2, z2], color="#b3aba0", lw=0.6, zorder=5.5)
+    # 坡道：剖到的各圈
+    for side, ang in ((1, SEC2_DEG), (-1, SEC2_DEG + 180)):
+        for ph in (ang - 720, ang - 360, ang, ang + 360):
+            if not (P.RAMP_START_DEG < ph < P.RAMP_END_DEG):
+                continue
+            zt_ = float(P.ramp_z_of_deg(ph))
+            x0_, x1_ = side * (P.RAMP_R - P.RAMP_W / 2), side * (P.RAMP_R + P.RAMP_W / 2)
+            ax.add_patch(MPoly([(x0_, zt_ - 0.26), (x1_, zt_ - 0.26), (x1_, zt_), (x0_, zt_)], closed=True, fc=poche,
+                               ec="none", zorder=6))
+            for xe in (x0_, x1_):
+                ax.plot([xe, xe], [zt_, zt_ + 1.05], color=GLASS, lw=0.9, zorder=6)
+    # 人物
+    def person(x, z, h=1.72):
+        ax.add_patch(MPoly([(x - 0.18, z), (x + 0.18, z), (x + 0.2, z + 0.82 * h), (x - 0.2, z + 0.82 * h)], closed=True,
+                           fc="#6d6a64" if env else INK, ec="none", zorder=7))
+        ax.add_patch(Circle((x, z + 0.92 * h), 0.12, fc="#6d6a64" if env else INK, ec="none", zorder=7))
+    person(-13.5, P.FFL); person(-11.2, P.FFL, 1.2); person(11.4, P.FFL); person(17.2, P.FFL); person(11.2, P.DECK)
+    person(-8.3, P.FFL)
+    info = dict(D=D, W=W, s_c=s_c, z_st=z_st, cuts=cuts, ms=ms, sky=sky)
+    if not env:
+        def note(xy_, txt, xytext, ha="left"):
+            ax.annotate(txt, xy=xy_, xytext=xytext, fontsize=10, color=INK, ha=ha, zorder=9,
+                        arrowprops=dict(arrowstyle="-", color=INK, lw=0.6, shrinkA=0, shrinkB=1))
+        note((s_c, 4.0), "疏散楼梯间（剖切）", (19.0, 3.0))
+        note((ms - 0.6, P.DECK + 2.9), "月洞墙（剖切面后）", (1.5, 12.9))
+        note((12.0, P.DECK + 1.2), "观景厅", (14.0, 9.0))
+        note((14.0, P.DECK), "屋面平台 +6.30", (19.0, 7.3))
+        note((14.2, 2.4), "展廊", (19.0, 1.6))
+        note((-13.0, 2.4), "门厅", (-21.5, 2.6), ha="right")
+        note((0.6, -0.4), "潮池", (2.8, -1.9))
+        note((-6.35, 2.6), "1:12 坡道", (-9.0, 5.4), ha="right")
+        note((ts - 1.5, 6.0), "树岛（剖切面后）", (-6.5, 9.9), ha="right")
+        for name, txt, xyt in (("Roof_B_Upper", "B  次屋顶", (-4.0, 13.4)), ("Roof_A_Main", "A  主屋顶", (21.0, 10.2)),
+                               ("Roof_C_Low", "C  低檐", (-24.5, 7.4))):
+            if name in cuts:
+                xs_, T_, _ = cuts[name]
+                i = len(xs_) // 2
+                note((xs_[i], T_[i]), txt, xyt)
+        for z, txt in ((P.DECK, "+6.30"), (P.FFL, "+0.85 首层"), (P.HIGH_TIDE, "±0.00 设计高潮位"), (P.LOW_TIDE, "-0.95 设计低潮位")):
+            ax.plot([s1 - 0.8, s1 - 0.1], [z, z], color=INK, lw=0.8, zorder=9)
+            ax.text(s1 - 1.0, z + 0.12, txt, fontsize=9.5, color=INK, ha="right", va="bottom", zorder=9)
+        scale_bar(ax, s0 + 0.5, -2.05, units=(0, 2, 5, 10), h=0.25, label_size=8)
+        ax.text(s0, 13.8, "南  ←", fontsize=10, color=MUTED)
+        ax.text(s1, 13.8, "→  北", fontsize=10, color=MUTED, ha="right")
+        fig.text(0.03, 0.93, "2-2 剖面 · 门厅—潮池—展廊—疏散楼梯间—观景厅", fontsize=18, color=INK)
+        fig.text(0.03, 0.895, "沿疏散楼梯间中心线（方位 105° / 285°）剖切；浅色为剖切面后的屋顶、柱、月洞墙与树岛",
+                 fontsize=11, color=MUTED)
+    if path is None:
+        return fig, ax, info
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+# ======================================================================= 1:20 檐口节点
+DETAIL_DEG = 300.0                                 # 门厅外檐（与“檐口细部”效果图同一处）
+
+
+def detail_eave(path):
+    """1:20 节点：门厅外檐。屋面构造、楔形挑檐与包边、阴影缝、檐沟与虹吸排水、胶合木主梁与木格栅、
+    钢箱环梁与柱头、幕墙收口、地面构造、基座挑檐与临水玻璃栏板。尺寸取自模型。"""
+    import program as PG
+    th = math.radians(DETAIL_DEG)
+    d = np.array([math.cos(th), math.sin(th)])
+    line = LineString([d * 5, d * 30])
+
+    def cross(poly):
+        i = line.intersection(poly.boundary)
+        pts = [i] if i.geom_type == "Point" else list(i.geoms)
+        return sorted(float(np.hypot(q.x, q.y)) for q in pts)
+    r_g = cross(P.E2)[-1]                           # 外侧玻璃
+    r_e = cross(P.ROOF_C.poly)[-1]                  # 檐口
+    r_p = cross(P.PLINTH_CUT)[-1]                   # 基座边
+    r_c = r_g - 0.85                                # 柱心
+    R = np.linspace(r_g - 1.9, r_e, 400)
+    XY = d[None] * R[:, None]
+    de = P.ROOF_C.dist_edge(XY[:, 0], XY[:, 1])
+    top, bot = P.ROOF_C.surfaces(XY[:, 0], XY[:, 1], de)
+    und = bot - P.ROOF_C.beam_depth(de)
+    gut = (de > 0.45) & (de < 0.75)
+    top = top - np.where(gut, 0.04 * np.sin(np.pi * (de - 0.45) / 0.30), 0.0)   # 余弦形檐沟
+    zu = lambda r: float(np.interp(r, R, und))
+    zb = lambda r: float(np.interp(r, R, bot))
+    zt = lambda r: float(np.interp(r, R, top))
+    fig = plt.figure(figsize=(12.5, 11.2), dpi=200, facecolor=PAPER)
+    ax = fig.add_axes([0.04, 0.05, 0.62, 0.86])
+    x0, x1, y0, y1 = r_g - 1.95, r_p + 0.75, -1.25, 5.15
+    ax.set_xlim(x0, x1); ax.set_ylim(y0, y1); ax.set_aspect("equal"); ax.axis("off")
+    LW = 0.7
+    steel, wood, glass_c, ins = "#7d8086", "#c9a77c", "#9fb6c2", "#efe2b8"
+    # 基座：钢筋混凝土箱体顶板 + 外墙 + 挑檐；水只在箱体外侧
+    slab_t, slab_b = P.FFL - 0.15, P.FFL - 0.40
+    wall_r = r_p - 0.6
+    ax.add_patch(MPoly([(wall_r, y0), (x1, y0), (x1, 0), (wall_r, 0)], closed=True, fc=WATER_HT, ec="none", zorder=0))
+    ax.plot([wall_r, x1], [0, 0], color="#5d7f93", lw=0.9, zorder=1)
+    ax.plot([wall_r, x1], [P.LOW_TIDE] * 2, color="#5d7f93", lw=0.9, ls=(0, (5, 3)), zorder=1)
+    ax.text((x0 + wall_r - 0.3) / 2, -0.35, "箱体内部：设备间 · 雨水蓄水池", ha="center", va="center", fontsize=9,
+            color=MUTED, zorder=2)
+    conc = dict(fc="#d9d4cb", ec=INK, lw=LW, hatch="..", zorder=3)
+    ax.add_patch(MPoly([(x0, slab_b), (wall_r, slab_b), (wall_r, y0), (wall_r - 0.3, y0), (wall_r - 0.3, slab_b - 0.0),
+                        (x0, slab_b)], closed=True, **conc))
+    ax.add_patch(MPoly([(x0, slab_b), (r_p, slab_b), (r_p, slab_t), (x0, slab_t)], closed=True, **conc))
+    ax.add_patch(MPoly([(wall_r - 0.3, y0), (wall_r, y0), (wall_r, slab_b), (wall_r - 0.3, slab_b)], closed=True, **conc))
+    # 地面构造：30 石材 + 30 结合层 + 50 地暖 + 40 保温
+    layers = [(slab_t, slab_t + 0.04, ins, "xx"), (slab_t + 0.04, slab_t + 0.09, "#e9e4dc", None),
+              (slab_t + 0.09, slab_t + 0.12, "#e3ddd2", None), (slab_t + 0.12, P.FFL, "#cfc6b8", None)]
+    for za, zb_, fc, hatch in layers:
+        ax.add_patch(MPoly([(x0, za), (r_p, za), (r_p, zb_), (x0, zb_)], closed=True, fc=fc, ec=INK, lw=0.4,
+                           hatch=hatch, zorder=3))
+    for xx in np.arange(x0 + 0.1, r_p - 0.1, 0.2):                    # 地暖盘管
+        ax.add_patch(Circle((xx, slab_t + 0.065), 0.01, fc="#c8743a", ec="none", zorder=4))
+    ax.add_patch(MPoly([(r_p - 0.01, P.FFL), (r_p + 0.01, P.FFL), (r_p + 0.01, P.FFL - 0.30), (r_p - 0.01, P.FFL - 0.30)],
+                       closed=True, fc=INK, ec="none", zorder=4))
+    ax.add_patch(MPoly([(r_p - 0.16, P.FFL - 0.32), (r_p - 0.08, P.FFL - 0.32), (r_p - 0.08, P.FFL - 0.30),
+                        (r_p - 0.16, P.FFL - 0.30)], closed=True, fc="#f3c46b", ec="none", zorder=4))
+    # 玻璃栏板 1.05 m
+    rb = r_p - 0.25
+    ax.add_patch(MPoly([(rb - 0.035, P.FFL), (rb + 0.035, P.FFL), (rb + 0.035, P.FFL + 0.09), (rb - 0.035, P.FFL + 0.09)],
+                       closed=True, fc=steel, ec=INK, lw=0.4, zorder=5))
+    ax.add_patch(MPoly([(rb - 0.012, P.FFL + 0.08), (rb + 0.012, P.FFL + 0.08), (rb + 0.012, P.FFL + 1.015),
+                        (rb - 0.012, P.FFL + 1.015)], closed=True, fc=glass_c, ec=INK, lw=0.4, alpha=0.9, zorder=5))
+    ax.add_patch(Circle((rb, P.FFL + 1.05), 0.024, fc=steel, ec=INK, lw=0.4, zorder=5))
+    # 柱：钢管 φ194、外张柱头、顶板 φ500
+    zc_top = zu(r_c) - 0.01
+    ax.add_patch(MPoly([(r_c - 0.097, P.FFL), (r_c + 0.097, P.FFL), (r_c + 0.097, zc_top - 0.62),
+                        (r_c - 0.097, zc_top - 0.62)], closed=True, fc=steel, ec=INK, lw=LW, zorder=5))
+    u = np.linspace(0, 1, 12)
+    rr = 0.097 + (0.21 - 0.097) * u ** 2.2
+    zz = zc_top - 0.62 + 0.6 * u
+    ax.add_patch(MPoly(np.vstack([np.stack([r_c - rr, zz], 1), np.stack([r_c + rr[::-1], zz[::-1]], 1)]), closed=True,
+                       fc=steel, ec=INK, lw=LW, zorder=5))
+    ax.add_patch(MPoly([(r_c - 0.25, zc_top - 0.025), (r_c + 0.25, zc_top - 0.025), (r_c + 0.25, zc_top),
+                        (r_c - 0.25, zc_top)], closed=True, fc="#5f6268", ec=INK, lw=LW, zorder=6))
+    ax.add_patch(MPoly([(r_c - 0.30, P.FFL - 0.02), (r_c + 0.30, P.FFL - 0.02), (r_c + 0.30, P.FFL + 0.02),
+                        (r_c - 0.30, P.FFL + 0.02)], closed=True, fc="#5f6268", ec=INK, lw=0.4, zorder=6))
+    for off in (-0.16, 0.16):                                         # 抗拔螺栓
+        ax.plot([r_c + off] * 2, [zc_top, zc_top + 0.16], color=INK, lw=1.2, zorder=7)
+    # 钢箱环梁（剖切，220 宽）
+    ax.add_patch(MPoly([(r_c - 0.11, zc_top), (r_c + 0.11, zc_top), (r_c + 0.11, zb(r_c)), (r_c - 0.11, zb(r_c))],
+                       closed=True, fc="#9a9ca1", ec=INK, lw=LW, hatch="////", zorder=6))
+    # 胶合木主梁（剖切面后，立面）：底面随悬挑弯矩变化，端部收于阴影缝内
+    r_end = r_e - P.REVEAL - 0.04
+    m = (R >= r_c - 0.11) & (R <= r_end)
+    ax.fill_between(R[m], und[m], bot[m], color=wood, ec=INK, lw=0.4, zorder=4)
+    # 木格栅次肋（剖到一根，100 高）
+    m2 = R <= r_end
+    ax.fill_between(R[m2], bot[m2] - P.RIB_DEPTH, bot[m2], color="#dcc3a0", ec=INK, lw=0.4, zorder=4.5)
+    # 屋面：GRC 面板 + 防水 + 保温 + 轻钢龙骨；挑檐端部为实心 GRC 楔形板
+    thick = top - bot
+    keel = thick > 0.30
+    ax.fill_between(R, bot, top, color="#e9e5de", ec="none", zorder=4.2)
+    ax.fill_between(R[keel], np.maximum(bot[keel], top[keel] - 0.142), top[keel] - 0.022, color=ins, hatch="xx",
+                    ec="#b9a96f", lw=0.3, zorder=4.3)
+    ax.fill_between(R, top - 0.02, top, color="#cfc9bf", ec=INK, lw=0.4, zorder=4.4)
+    ax.plot(R, bot, color=INK, lw=LW, zorder=4.6); ax.plot(R, top, color=INK, lw=LW, zorder=4.6)
+    for xx in np.arange(r_c + 0.3, r_e - 1.2, 0.6):                   # 龙骨（C 型钢）
+        z_a, z_b = zb(xx) + 0.02, zt(xx) - 0.16
+        if z_b - z_a > 0.08:
+            ax.plot([xx - 0.03, xx - 0.03, xx + 0.03], [z_b, z_a, z_a], color=steel, lw=1.0, zorder=4.4)
+            ax.plot([xx - 0.03, xx + 0.03], [z_b, z_b], color=steel, lw=1.0, zorder=4.4)
+    # 檐沟格栅 + 虹吸雨水斗 + 层内水平管 → 柱内立管
+    rg_ = R[gut]
+    if len(rg_):
+        ax.plot([rg_.min(), rg_.max()], [zt(rg_.min()) - 0.005] * 2, color=INK, lw=0.6, ls=(0, (1, 1)), zorder=5)
+        ro = (rg_.min() + rg_.max()) / 2
+        ax.add_patch(MPoly([(ro - 0.04, zt(ro) - 0.10), (ro + 0.04, zt(ro) - 0.10), (ro + 0.04, zt(ro)),
+                            (ro - 0.04, zt(ro))], closed=True, fc="#5f6268", ec="none", zorder=5))
+        zp = zt(ro) - 0.12
+        ax.plot([ro, r_c + 0.02, r_c + 0.02], [zp, zb(r_c) + 0.06, P.FFL + 0.2], color="#3d6f9c", lw=1.0,
+                ls=(0, (4, 2)), zorder=7)
+    # 檐口包边（半圆形拉丝金属）与阴影缝
+    ze = (zt(r_e - 0.01) + zb(r_e - 0.01)) / 2
+    tt = np.linspace(-np.pi / 2, np.pi / 2, 30)
+    ax.add_patch(MPoly(np.stack([r_e - 0.02 + 0.08 * np.cos(tt), ze + 0.08 * np.sin(tt)], 1), closed=True,
+                       fc="#c8c4bd", ec=INK, lw=LW, zorder=6))
+    # 幕墙：玻璃（8+12A+8）、竖梃（剖切面后）、顶部收口带、底槛、暗藏灯带
+    z_head = zu(r_g) - 0.04
+    for off in (-0.014, 0.014):
+        ax.plot([r_g + off] * 2, [P.FFL + 0.07, z_head], color="#4c6f80", lw=0.8, zorder=6)
+    ax.add_patch(MPoly([(r_g - 0.025, P.FFL + 0.07), (r_g + 0.025, P.FFL + 0.07), (r_g + 0.025, z_head),
+                        (r_g - 0.025, z_head)], closed=True, fc=glass_c, ec="none", alpha=0.35, zorder=5.5))
+    ax.add_patch(MPoly([(r_g - 0.09, P.FFL - 0.01), (r_g + 0.05, P.FFL - 0.01), (r_g + 0.05, P.FFL + 0.07),
+                        (r_g - 0.09, P.FFL + 0.07)], closed=True, fc=steel, ec=INK, lw=0.4, zorder=6))
+    ax.add_patch(MPoly([(r_g - 0.10, z_head), (r_g + 0.07, z_head), (r_g + 0.07, zb(r_g) + 0.04),
+                        (r_g - 0.10, zb(r_g) + 0.04)], closed=True, fc="#c8c4bd", ec=INK, lw=0.4, zorder=6))
+    ax.add_patch(MPoly([(r_g - 0.16, z_head - 0.02), (r_g - 0.10, z_head - 0.02), (r_g - 0.10, z_head),
+                        (r_g - 0.16, z_head)], closed=True, fc="#f3c46b", ec="none", zorder=6))
+    # 尺寸标注
+    def dim_h(xa, xb, y, txt, up=True):
+        ax.annotate("", xy=(xa, y), xytext=(xb, y), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.6,
+                                                                    shrinkA=0, shrinkB=0), zorder=8)
+        ax.text((xa + xb) / 2, y + (0.06 if up else -0.06), txt, ha="center", va="bottom" if up else "top",
+                fontsize=8.5, color=INK, zorder=8)
+
+    def dim_v(x, ya, yb, txt):
+        ax.annotate("", xy=(x, ya), xytext=(x, yb), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.6,
+                                                                    shrinkA=0, shrinkB=0), zorder=8)
+        ax.text(x + 0.05, (ya + yb) / 2, txt, ha="left", va="center", fontsize=8.5, color=INK, rotation=90, zorder=8)
+    dim_h(r_g, r_e, zt(r_e) + 0.32, f"挑檐 {r_e - r_g:.2f} m")
+    dim_v(r_g - 0.55, P.FFL, zu(r_g), f"净高 {zu(r_g) - P.FFL:.2f} m")
+    dim_v(rb + 0.18, P.FFL, P.FFL + 1.05, "1.05 m")
+    for z, txt in ((P.FFL, "+0.85"), (0.0, "±0.00 设计高潮位"), (P.LOW_TIDE, "-0.95 设计低潮位")):
+        ax.plot([x1 - 0.35, x1 - 0.05], [z, z], color=INK, lw=0.8, zorder=8)
+        ax.text(x1 - 0.05, z + 0.05, txt, ha="right", va="bottom", fontsize=8.5, color=INK, zorder=8)
+    # 编号引线 + 右侧说明
+    items = [
+        ((r_e - 1.6, zt(r_e - 1.6) - 0.01), "20 厚 GRC 屋面板，象牙白矿物涂层"),
+        ((r_c + 0.8, zt(r_c + 0.8) - 0.08), "防水卷材 + 120 厚挤塑保温"),
+        ((r_c + 0.31, zb(r_c + 0.31) + 0.09), "轻钢龙骨层，屋面板下设钢拉杆水平支撑"),
+        ((r_c + 1.0, zu(r_c + 1.0) + 0.05), f"胶合木主梁 GL28h 160 宽，高 {P.BEAM_EDGE * 1000:.0f} → {P.ROOF_C.beam_core * 1000:.0f}"),
+        ((r_g + 0.6, zb(r_g + 0.6) - 0.05), "100 厚木格栅次肋，间距约 240"),
+        ((r_e - 0.02, ze), "半圆形拉丝金属包边，檐口厚 150"),
+        ((r_e - P.REVEAL / 2 - 0.02, zb(r_e - 0.1) - 0.04), "120 阴影缝，梁与格栅端部收于缝内"),
+        ((ro if len(rg_) else r_e - 0.6, zt(r_e - 0.6) - 0.03), "余弦形檐沟 + 金属格栅 + 虹吸雨水斗"),
+        ((r_c, zb(r_c) - 0.15), "钢箱环梁 220 宽，梁底与主梁底平"),
+        ((r_c + 0.12, zc_top - 0.3), "钢管柱 φ194×10，外张柱头，顶板 φ500，抗拔螺栓"),
+        ((r_c + 0.02, P.FFL + 1.2), "雨水立管 DN100 藏于柱内 → 基座蓄水池"),
+        ((r_g, z_head + 0.08), "顶部金属收口带封至梁底，内侧暗藏灯带"),
+        ((r_g, P.FFL + 1.6), "幕墙：50×130 竖梃，8+12A+8 Low-E 中空夹胶玻璃"),
+        ((r_g - 1.2, P.FFL - 0.03), "30 石材 + 30 结合层 + 50 地暖 + 40 保温"),
+        ((r_g - 1.0, slab_b + 0.12), "250 厚钢筋混凝土箱体顶板（箱内为设备间、蓄水池）"),
+        ((rb, P.FFL + 0.6), "玻璃栏板 12+12 夹胶，φ48 扶手，高 1.05 m"),
+        ((r_p - 0.12, P.FFL - 0.31), "基座挑檐 300，檐下灯带"),
+    ]
+    # 编号标签：贴在构件旁（不拉长引线），右侧列出说明
+    offsets = [(0.0, 0.16), (-0.05, 0.22), (0.0, -0.20), (0.15, -0.2), (0.0, -0.18), (0.2, 0.05), (0.05, -0.2),
+               (0.0, 0.18), (-0.28, 0.0), (0.26, -0.1), (0.22, 0.0), (-0.2, 0.08), (0.18, 0.0), (0.0, 0.18),
+               (0.0, -0.12), (-0.2, 0.0), (0.0, -0.17)]
+    ys = np.linspace(0.90, 0.12, len(items))
+    for k, ((xa, ya), txt) in enumerate(items):
+        ox, oy = offsets[k]
+        tx, ty = xa + ox, ya + oy
+        if ox or oy:
+            ax.plot([xa, tx], [ya, ty], color="#6d6a64", lw=0.5, zorder=9)
+        ax.add_patch(Circle((xa, ya), 0.018, fc=SUN, ec="none", zorder=10))
+        ax.add_patch(Circle((tx, ty), 0.075, fc=PAPER, ec=SUN, lw=0.8, zorder=10))
+        ax.text(tx, ty, f"{k + 1}", ha="center", va="center", fontsize=7.5, color=SUN, zorder=11)
+        fy = ys[k]
+        fig.text(0.70, fy, f"{k + 1:>2}", fontsize=9.5, color=SUN, va="center")
+        fig.text(0.725, fy, txt, fontsize=9.5, color=INK, va="center")
+    scale_bar(ax, x0 + 0.1, y0 + 0.18, units=(0, 0.5, 1), h=0.04, label_size=8, unit_gap=0.08)
+    fig.text(0.04, 0.955, "节点大样 1:20 · 门厅外檐", fontsize=18, color=INK)
+    fig.text(0.04, 0.93, "楔形挑檐、阴影缝与檐沟排水；屋面荷载经胶合木主梁 → 钢箱环梁 → 柱；尺寸取自模型（方位 300° 径向剖切）",
+             fontsize=10, color=MUTED)
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+# ======================================================================= 形体生成
+def _axo(x, y, z, a=-45.0, el=32.0):
+    """轴测投影：自东南上方看，屏幕上方为西北。"""
+    ca, sa = math.cos(math.radians(a)), math.sin(math.radians(a))
+    xr = x * ca - y * sa
+    yr = x * sa + y * ca
+    return xr, yr * math.sin(math.radians(el)) + z * math.cos(math.radians(el))
+
+
+def _axo_poly(ax, ring, z, **kw):
+    ring = np.asarray(ring)
+    zz = np.broadcast_to(z, (len(ring),))
+    X, Y = _axo(ring[:, 0], ring[:, 1], zz)
+    ax.add_patch(MPoly(np.stack([X, Y], 1), closed=True, **kw))
+
+
+def form_diagram(path):
+    """形体生成：潮池 → 三片月牙 → 错落升起 → 对准冬至日落。"""
+    fig = plt.figure(figsize=(18, 3.9), dpi=200, facecolor=PAPER)
+    clip = Point(0, 0).buffer(24, 128)
+    plinth = P.PLINTH_ALL.intersection(clip)
+    cols = {"Roof_A_Main": "#efe9df", "Roof_B_Upper": "#f8f4ee", "Roof_C_Low": "#e7e0d4"}
+    steps = [("1  潮池", "一圈会涨落的水：经水口与湖面相通，一日两涨两落"),
+             ("2  三片月牙", "三片月牙屋顶环抱潮池，彼此交错，围出庭院"),
+             ("3  错落升起", "主屋顶西翼尖扬起，次屋顶叠于其上，低檐伏于水面"),
+             ("4  对准冬至日落", "水口、潮池与月洞墙同指冬至日落方位 242.6°")]
+
+    def roof_ring(roof, n=360):
+        ring = ccw_ring(roof.poly)
+        tt = np.linspace(0, len(ring) - 1, n).astype(int)
+        ring = ring[tt]
+        top, _ = roof.surfaces(ring[:, 0], ring[:, 1])
+        return ring, top
+    for k, (title, cap) in enumerate(steps):
+        ax = fig.add_axes([0.01 + k * 0.248, 0.215, 0.235, 0.635])
+        ax.set_aspect("equal"); ax.axis("off")
+        ax.set_xlim(-26, 26); ax.set_ylim(-10.8, 19.2)
+        base = P.PLINTH_CUT.intersection(clip)              # 台基上的水口：潮池经此与湖面相通
+        parts = [base] if base.geom_type == "Polygon" else list(base.geoms)
+        for g in parts:
+            _axo_poly(ax, np.asarray(g.exterior.coords), 0.0, fc="#e4ddd2", ec="#a59e93", lw=0.6, zorder=1)
+        inlet = P.CHANNEL.intersection(plinth).difference(P.BASIN)
+        for g in ([inlet] if inlet.geom_type == "Polygon" else list(inlet.geoms)):
+            _axo_poly(ax, np.asarray(g.exterior.coords), 0.0, fc=WATER_HT, ec="#5d7f93", lw=0.6, zorder=2)
+        circ = np.stack([P.BASIN_R * np.cos(np.linspace(0, 2 * np.pi, 120)),
+                         P.BASIN_R * np.sin(np.linspace(0, 2 * np.pi, 120))], 1)
+        _axo_poly(ax, circ, 0.0, fc=WATER_HT, ec="#5d7f93", lw=0.8, zorder=2)
+        if k == 0:
+            for r_out, _, _ in P.BASIN_STEPS:
+                c = np.stack([r_out * np.cos(np.linspace(0, 2 * np.pi, 120)), r_out * np.sin(np.linspace(0, 2 * np.pi, 120))], 1)
+                X, Y = _axo(c[:, 0], c[:, 1], np.zeros(len(c)))
+                ax.plot(X, Y, color="#8aa3b0", lw=0.5, zorder=2)
+            for zz_ in (0.0, -0.95):
+                X, Y = _axo(circ[:, 0] * 0.6, circ[:, 1] * 0.6, np.full(len(circ), zz_ * 1.5))
+                ax.plot(X, Y, color="#5d7f93", lw=0.8, ls="-" if zz_ == 0 else (0, (3, 2)), zorder=3)
+        roofs = sorted(P.ROOFS, key=lambda r: float(np.mean(roof_ring(r, 60)[1])))
+        if k >= 2:                                           # 屋顶在水面上的投影，提示“升起”
+            for roof in roofs:
+                ring, top = roof_ring(roof)
+                X, Y = _axo(ring[:, 0], ring[:, 1], np.zeros(len(ring)))
+                ax.add_patch(MPoly(np.stack([X, Y], 1), closed=True, fc="#8a7f70", ec="none", alpha=0.16, zorder=3))
+        if k >= 1:
+            for roof in roofs:
+                ring, top = roof_ring(roof)
+                zz = np.zeros(len(ring)) if k == 1 else top
+                zo = 5 + 2 * roofs.index(roof)
+                ghost = k == 3 and roof.name == "Roof_B_Upper"      # 第 4 步揭开次屋顶，露出其下的月洞墙
+                if k >= 2 and not ghost:                         # 屋檐厚度
+                    Xb, Yb = _axo(ring[:, 0], ring[:, 1], zz - 0.55)
+                    ax.add_patch(MPoly(np.stack([Xb, Yb], 1), closed=True, fc="#b9b0a3", ec=INK, lw=0.6, zorder=zo))
+                X, Y = _axo(ring[:, 0], ring[:, 1], zz)
+                if ghost:
+                    ax.add_patch(MPoly(np.stack([X, Y], 1), closed=True, fc=cols[roof.name], alpha=0.45, ec="none",
+                                       zorder=zo + 1))
+                    ax.plot(np.r_[X, X[0]], np.r_[Y, Y[0]], color=INK, lw=0.8, ls=(0, (4, 2.5)), zorder=zo + 1)
+                    continue
+                ax.add_patch(MPoly(np.stack([X, Y], 1), closed=True, fc=cols[roof.name] if k > 1 else "none",
+                                   ec=INK, lw=1.0 if k > 1 else 1.2, zorder=zo + 1))
+                if k >= 2:
+                    for i in range(0, len(ring), 45):
+                        Xb, Yb = _axo(np.array([ring[i, 0]] * 2), np.array([ring[i, 1]] * 2), np.array([0.0, top[i]]))
+                        ax.plot(Xb, Yb, color="#9b948a", lw=0.5, ls=(0, (2, 2)), zorder=4)
+                if k == 1:                                       # 标注放在不与其他屋顶重叠的部分
+                    others = shapely.union_all([r.poly for r in roofs if r is not roof])
+                    own = roof.poly.difference(others)
+                    own = max(own.geoms, key=lambda g: g.area) if own.geom_type != "Polygon" else own
+                    c = shapely.ops.polylabel(own, tolerance=0.05)
+                    Xc, Yc = _axo(np.array([c.x]), np.array([c.y]), np.array([0.0]))
+                    ax.text(Xc[0], Yc[0], roof.name.split("_")[1], ha="center", va="center", fontsize=12, color=INK,
+                            zorder=9)
+        if k == 3:
+            import matplotlib.patheffects as pe
+            halo = [pe.withStroke(linewidth=3.2, foreground=PAPER)]
+            # 月洞墙：立于屋面平台西端，墙面垂直于轴线（厚 0.42 m，圆洞半径 1.42 m）
+            hr, hz, zt = P.MOON_HOLE_R, P.DECK + 0.5 + P.MOON_HOLE_R, P.DECK + 4.3
+            u = np.array([-P.MOON_HALF, P.MOON_HALF, P.MOON_HALF, -P.MOON_HALF])
+            wz = np.array([P.DECK, P.DECK, zt, zt])
+            tt = np.linspace(0, 2 * np.pi, 90)
+            for off, fc in ((0.21, "#cfc6b8"), (-0.21, "#f4efe7")):      # 先画背面，再画朝向观者的一面
+                q = P.MOON_C[None] + P.AXIS[None] * off + P.AXIS_N[None] * u[:, None]
+                Xw, Yw = _axo(q[:, 0], q[:, 1], wz)
+                ax.add_patch(MPoly(np.stack([Xw, Yw], 1), closed=True, fc=fc, ec=INK, lw=0.8, zorder=11))
+                qh = P.MOON_C[None] + P.AXIS[None] * off + P.AXIS_N[None] * (hr * np.cos(tt))[:, None]
+                Xh, Yh = _axo(qh[:, 0], qh[:, 1], hz + hr * np.sin(tt))
+                ax.add_patch(MPoly(np.stack([Xh, Yh], 1), closed=True, fc=cols["Roof_A_Main"], ec=INK, lw=0.7,
+                                   zorder=11))
+            # 轴线：潮池中心 → 水口 → 冬至日落；月洞的视线与之平行
+            ln = np.stack([P.AXIS * -4, P.AXIS * 24.0], 0)
+            X, Y = _axo(ln[:, 0], ln[:, 1], np.array([0.6, 0.6]))
+            ax.plot(X, Y, color=SUN, lw=1.6, ls=(0, (6, 3)), zorder=12, path_effects=halo)
+            q0 = P.MOON_C; q1 = P.MOON_C + P.AXIS * 17.0
+            Xv, Yv = _axo(np.array([q0[0], q1[0]]), np.array([q0[1], q1[1]]), np.array([hz, hz]))
+            ax.add_patch(FancyArrowPatch((Xv[0], Yv[0]), (Xv[1], Yv[1]), arrowstyle="-|>", mutation_scale=11, color=SUN,
+                                         lw=1.4, ls=(0, (6, 3)), zorder=12))
+            sp = P.AXIS * 25.5
+            Xs, Ys = _axo(np.array([sp[0]]), np.array([sp[1]]), np.array([0.6]))
+            ax.add_patch(Circle((Xs[0], Ys[0]), 1.1, fc=SUN, ec="none", zorder=12))
+            ax.text(Xs[0], Ys[0] - 1.7, "冬至日落\n242.6°", ha="center", va="top", fontsize=9.5, color=SUN, zorder=12,
+                    linespacing=1.15)
+            ax.text(Xv[0] + 1.5, Yv[0] - 0.2, "月洞墙", ha="left", va="center", fontsize=9.5, color=INK, zorder=12,
+                    path_effects=halo)
+        fig.text(0.02 + k * 0.248, 0.125, title, fontsize=15, color=INK)
+        fig.text(0.02 + k * 0.248, 0.045, cap, fontsize=10, color=MUTED)
+    fig.text(0.01, 0.905, "形体生成", fontsize=20, color=INK)
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+def ccw_ring(poly):
+    return ccw(resample_ring(poly.exterior.coords, 0.3))
+
+
+# ======================================================================= 环境策略
+ENV_LEGEND = [("日照", "冬至正午 36.6° 的阳光越过低檐照进潮池，在门厅玻璃内约 2 m；夏至正午 83.4° 被屋面与 2.8 m 挑檐挡住"),
+              ("庭院拔风", "湖面凉风自南侧低位进入，经门厅与潮池上空升起，自庭院上方排出"),
+              ("展廊排风", "庭院侧玻璃可开启，热空气经屋面光缝排出"),
+              ("湖水源热泵", "湖底换热盘管 + 地板辐射供暖 / 供冷，设备间在基座箱体内"),
+              ("雨水", "檐沟虹吸雨水斗 → 柱内立管 → 基座蓄水池，回用于冲厕与潮池补水"),
+              ("天光", "屋面光缝顺北侧实墙洗下，展厅不受直射光"),
+              ("西晒", "展廊朝西、北为实墙；观景厅西侧由月洞墙与深挑檐遮挡")]
+
+
+def env_diagram(path, legend=True):
+    """环境策略：以 2-2 剖面为底。冬夏日照与挑檐遮阳、庭院拔风、展廊经屋面光缝排风、湖水源热泵与地板辐射、
+    屋面雨水回用、天光洗墙。legend=False 时不画图例（图板右栏另列）。"""
+    from matplotlib.path import Path as MPath
+    fig, ax, info = section_cross(None, env=True)
+    blue, warm, rain, sun_w, sun_s, day = "#3d7fb0", "#d06a34", "#2f6fa1", "#e3a23b", "#c8743a", "#e8c45a"
+
+    def flow(pts, col, lw=2.2, ls="-"):
+        pts = np.asarray(pts, float)
+        codes = [MPath.MOVETO] + [MPath.CURVE3] * (len(pts) - 1) if len(pts) % 2 == 1 else [MPath.MOVETO] + [MPath.LINETO] * (len(pts) - 1)
+        ax.add_patch(FancyArrowPatch(path=MPath(pts, codes), arrowstyle="-|>", mutation_scale=14, color=col, lw=lw,
+                                     ls=ls, zorder=12))
+
+    def tag(x, y, n):
+        ax.add_patch(Circle((x, y), 0.55, fc=PAPER, ec=SUN, lw=1.0, zorder=13))
+        ax.text(x, y, str(n), ha="center", va="center", fontsize=10, color=SUN, zorder=14)
+    # 1 冬至正午低角度阳光进入门厅与庭院；夏至正午高角度阳光被屋面与挑檐挡住
+    for alt, col, ends in ((36.56, sun_w, [(-14.1, P.FFL), (-3.2, 0.25), (0.8, P.BASIN_FLOOR + 0.6)]),
+                           (83.44, sun_s, [(-15.5, 4.8), (-12.5, 4.65), (10.5, 6.0), (14.0, 6.05)])):
+        dv = np.array([math.cos(math.radians(alt)), -math.sin(math.radians(alt))])
+        for ex, ez in ends:
+            t0 = (13.6 - ez) / -dv[1]
+            st = np.array([ex, ez]) - dv * t0
+            ax.add_patch(FancyArrowPatch(tuple(st), (ex, ez), arrowstyle="-|>", mutation_scale=10, color=col, lw=1.3,
+                                         zorder=11))
+    tag(-24.6, 12.2, 1)
+    # 2 庭院拔风：湖面凉风自南侧低位进入，经门厅、潮池上空升起，自庭院上方排出
+    flow([(-26.5, 1.5), (-20.0, 1.7), (-13.0, 2.0)], blue)
+    flow([(-11.5, 2.2), (-6.0, 2.4), (-2.0, 4.5)], blue)
+    flow([(-1.5, 5.2), (0.5, 8.8), (2.0, 13.4)], warm, lw=2.6)
+    tag(-20.0, 3.3, 2)
+    # 3 展廊：庭院侧玻璃可开启，热空气经屋面光缝排出
+    if info["sky"]:
+        a_, b_ = info["sky"][0]
+        sx = (a_ + b_) / 2
+        flow([(8.0, 1.8), (13.0, 2.4), (sx, 4.2)], blue, lw=1.8)
+        flow([(sx, 4.6), (sx + 0.2, 6.6), (sx + 0.4, 8.6)], warm, lw=1.8)
+        tag(sx + 1.6, 8.2, 3)
+        # 6 天光：光缝顺北墙洗下
+        for k in range(3):
+            ax.add_patch(FancyArrowPatch((sx - 0.5 + 0.4 * k, 9.6), (sx + 0.6 + 0.25 * k, 1.4 + 0.5 * k),
+                                         arrowstyle="-|>", mutation_scale=9, color=day, lw=1.2, alpha=0.9, zorder=11))
+        tag(sx - 1.7, 9.4, 6)
+    # 4 湖水源热泵 + 地板辐射供暖供冷
+    ax.add_patch(MPoly([(-15.5, -1.55), (-9.5, -1.55), (-9.5, 0.25), (-15.5, 0.25)], closed=True, fc="#f3eee5",
+                       ec="#6d6a64", lw=0.8, zorder=10))
+    ax.text(-12.5, -0.45, "设备间\n热泵 · 水箱", ha="center", va="center", fontsize=8.5, color=INK, zorder=11)
+    xx = np.linspace(-26.5, -20.5, 120)
+    ax.plot(xx, -1.95 + 0.12 * np.sin(xx * 6), color=blue, lw=1.4, zorder=11)
+    ax.plot([-20.5, -18.0, -15.5], [-1.95, -1.6, -1.2], color=blue, lw=1.4, zorder=11)
+    for xa_, xb_ in ((-17.6, -10.6), (9.8, 18.0)):
+        xx = np.linspace(xa_, xb_, 200)
+        ax.plot(xx, P.FFL - 0.07 + 0.03 * np.sin(xx * 9), color=warm, lw=1.0, zorder=11)
+    tag(-23.4, -1.0, 4)
+    # 5 雨水：檐沟 → 柱内立管 → 基座蓄水池 → 冲厕、潮池补水
+    ax.add_patch(MPoly([(-8.8, -1.55), (-6.4, -1.55), (-6.4, -0.2), (-8.8, -0.2)], closed=True, fc="#dfe9f0",
+                       ec=rain, lw=0.8, zorder=10))
+    ax.text(-7.6, -0.85, "蓄水池", ha="center", va="center", fontsize=8.5, color=rain, zorder=11)
+    flow([(-18.0, 4.62), (-16.5, 4.4), (-14.8, 4.1)], rain, lw=1.4, ls=(0, (3, 2)))
+    ax.plot([-14.8, -14.8, -8.8], [4.0, -1.3, -1.3], color=rain, lw=1.4, ls=(0, (3, 2)), zorder=11)
+    flow([(-6.4, -0.6), (-5.6, -0.4), (-4.9, -0.2)], rain, lw=1.4, ls=(0, (3, 2)))
+    tag(-18.6, 5.9, 5)
+    # 7 西晒：展廊外墙为实墙；观景厅西侧有月洞墙与深挑檐
+    tag(info["ms"] - 2.2, P.DECK + 4.6, 7)
+    ax.set_ylim(-2.9, 14.2)
+    # 版面：图高由横向比例决定，标题紧贴图上方，图例（可选）在图下方
+    (x0_, x1_), (y0_, y1_) = ax.get_xlim(), ax.get_ylim()
+    wi = 16 * 0.94
+    hi = wi * (y1_ - y0_) / (x1_ - x0_)
+    head, foot = 0.85, (1.25 if legend else 0.2)
+    Hf = head + hi + foot
+    fig.set_size_inches(16, Hf)
+    ax.set_position([0.03, foot / Hf, 0.94, hi / Hf])
+    fig.text(0.03, (Hf - 0.36) / Hf, "环境策略 · 以 2-2 剖面示意", fontsize=18, color=INK, va="center")
+    fig.text(0.03, (Hf - 0.66) / Hf, "北纬 30°：遮阳、通风、湖水源热泵、雨水回用与天光", fontsize=11, color=MUTED,
+             va="center")
+    if legend:
+        for k, (name, t) in enumerate(ENV_LEGEND):
+            fig.text(0.035 + (k // 4) * 0.47, (foot - 0.3 - (k % 4) * 0.25) / Hf, f"{k + 1}  {name}：{t}", fontsize=9.5,
+                     color=INK, va="center")
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
 # ======================================================================= 潮位曲线
+def level_mark(ax, x, z, txt, side="right", size=8.5, color=INK, h=0.3, run=3.6):
+    """标高符号：倒三角尖端落在标高处，数字写在三角形上方的横线上。"""
+    ax.add_patch(MPoly([(x, z), (x - h, z + h), (x + h, z + h)], closed=True, fc="none", ec=color, lw=0.8, zorder=9))
+    x1 = x + h + run if side == "right" else x - h - run
+    ax.plot([x - h if side == "right" else x + h, x1], [z + h, z + h], color=color, lw=0.8, zorder=9)
+    ax.text(x - h + 0.1 if side == "right" else x + h - 0.1, z + h + 0.06, txt, fontsize=size, color=color,
+            ha="left" if side == "right" else "right", va="bottom", zorder=9)
+
+
+ELEV_NOTES = [  # (要素, 指向点 (x, z), 文字位置 (x, z), 对齐)
+    ("B  次屋顶", (2.0, 10.9), (6.5, 13.4), "left"),
+    ("A  主屋顶 · 西翼尖", (-17.5, 9.3), (-19.0, 11.4), "right"),
+    ("C  低檐", (14.0, 4.6), (16.5, 8.6), "left"),
+    ("Y 形斜柱", (-11.3, 3.2), (-18.6, 4.4), "right"),
+    ("月洞墙", (-8.4, 8.3), (-16.0, 7.6), "right"),
+    ("栈桥（剖切）", (0.0, 0.55), (4.0, -3.0), "left"),
+]
+
+
+def elevation_drawing(raw, path, notes=ELEV_NOTES):
+    """南立面：elevation.py 的线稿渲染 + 水体、标高、比例尺与要素标注。"""
+    import json
+    with open(raw[:-4] + ".json") as f:
+        meta = json.load(f)
+    img = plt.imread(raw)
+    u0, u1, z0, z1 = meta["extent"]
+    xa, xb, za, zb = -23.0, 29.0, -4.4, 14.4
+    wi = 16 * 0.94
+    hi = wi * (zb - za) / (xb - xa)
+    head, foot = 0.85, 0.15
+    Hf = head + hi + foot
+    fig = plt.figure(figsize=(16, Hf), dpi=200, facecolor=PAPER)
+    ax = fig.add_axes([0.03, foot / Hf, 0.94, hi / Hf])
+    ax.set_xlim(xa, xb); ax.set_ylim(za, zb); ax.set_aspect("equal"); ax.axis("off")
+    ax.imshow(img, extent=(u0, u1, z0, z1), zorder=3, interpolation="antialiased")
+    # 水体在立面前方：设计高潮位以下以半透明浅蓝覆盖，没入水中的台基仍隐约可见
+    zw = -2.5
+    ax.add_patch(MPoly([(xa, zw), (21.5, zw), (21.5, P.HIGH_TIDE), (xa, P.HIGH_TIDE)], closed=True, fc=WATER_HT,
+                       alpha=0.55, ec="none", zorder=4))
+    ax.plot([xa, 21.5], [P.HIGH_TIDE] * 2, color="#5d7f93", lw=1.0, zorder=5)
+    ax.plot([xa, 21.5], [P.LOW_TIDE] * 2, color="#5d7f93", lw=0.8, ls=(0, (5, 3)), zorder=5)
+    for z, txt in ((P.DECK, "+6.30 屋面平台"), (P.FFL, "+0.85 首层"), (P.HIGH_TIDE, "±0.00 设计高潮位"),
+                   (P.LOW_TIDE, "-0.95 设计低潮位")):
+        ax.plot([20.0, 22.9], [z, z], color=INK, lw=0.6, zorder=9)
+        level_mark(ax, 22.9, z, txt)
+    zmax, xmax = 0.0, 0.0
+    for r in P.ROOFS:                                      # 最高点（次屋顶）
+        xs = np.linspace(*r.poly.bounds[0::2], 200); ys = np.linspace(*r.poly.bounds[1::2], 200)
+        X, Y = np.meshgrid(xs, ys); X, Y = X.ravel(), Y.ravel()
+        m = shapely.contains_xy(r.poly, X, Y)
+        top, _ = r.surfaces(X[m], Y[m])
+        if top.max() > zmax:
+            zmax, xmax = float(top.max()), float(X[m][np.argmax(top)])
+    level_mark(ax, xmax, zmax, f"+{zmax:.2f} 最高点")
+    for txt, xy, xyt, ha in notes:
+        ax.annotate(txt, xy=xy, xytext=xyt, fontsize=10, color=INK, ha=ha, va="center", zorder=9,
+                    arrowprops=dict(arrowstyle="-", color=INK, lw=0.6, shrinkA=2, shrinkB=1))
+    scale_bar(ax, xa + 0.6, -3.5, units=(0, 2, 5, 10), h=0.18, label_size=8, unit_gap=0.6)
+    ax.text(xa + 0.3, zb - 0.6, "西  ←", fontsize=10, color=MUTED)
+    ax.text(27.0, zb - 0.6, "→  东", fontsize=10, color=MUTED, ha="right")
+    fig.text(0.03, (Hf - 0.36) / Hf, "南立面", fontsize=18, color=INK, va="center")
+    fig.text(0.03, (Hf - 0.66) / Hf, "自湖面南侧看向门厅；栈桥在台基南缘外剖切（黑色）；浅蓝为设计高潮位以下的水体",
+             fontsize=11, color=MUTED, va="center")
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
 def tide_curve(path):
     """一日两次涨落（半日潮，周期 12 h 25 min），潮差 0.95 m。"""
     t = np.linspace(0, 24, 600)
@@ -873,9 +1591,16 @@ if __name__ == "__main__":
     os.makedirs(out, exist_ok=True)
     site_plan(os.path.join(out, "plan_axis.png"))
     location_map(os.path.join(out, "location.png"))
+    section_cross(os.path.join(out, "section_2.png"))
+    detail_eave(os.path.join(out, "detail_eave.png"))
+    form_diagram(os.path.join(out, "form.png"))
+    env_diagram(os.path.join(out, "environment.png"))
     section(os.path.join(out, "section.png"))
     tide_curve(os.path.join(out, "tide_curve.png"))
     support_map(os.path.join(out, "support_map.png"))
     plan_ground(os.path.join(out, "plan_ground.png"))
     plan_deck(os.path.join(out, "plan_deck.png"))
+    raw = os.path.join(out, "elevation_south_raw.png")          # elevation.py 的线稿底图（渲染较慢，单独生成）
+    if os.path.exists(raw):
+        elevation_drawing(raw, os.path.join(out, "elevation_south.png"))
     print("diagrams ->", out)

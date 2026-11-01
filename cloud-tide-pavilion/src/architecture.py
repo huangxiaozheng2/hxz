@@ -917,6 +917,62 @@ def ring_beam(buf, roof, cols, w=0.22):
     buf.add(v, f)
 
 
+# =================================================================== 临水防护栏杆
+def _runs(mask):
+    idx = np.where(mask)[0]
+    if not len(idx):
+        return []
+    return np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+
+
+def edge_railing_paths(inset=0.25):
+    """首层平台与栈桥临水边的栏杆路线（内收 inset）：让开潮池与水口（已有栏杆或为亲水台阶）、
+    栈桥落岸处、Y 形斜柱石墩与柱。高潮时临空约 0.85 m，低潮时约 1.8 m，按公共临空处设 1.05 m 玻璃栏板。"""
+    import structure as ST
+    g = P.PLINTH_CUT.buffer(-inset, 32)
+    parts = [g] if g.geom_type == "Polygon" else list(g.geoms)
+    cols = np.vstack([ST.E1_COLS_INNER, ST.E1_COLS_OUTER, ST.E2_COLS, ST.A_EAST_COLS, ST.C_EXTRA_COLS])
+    avoid = shapely.unary_union([P.WATER_CUT.buffer(0.6), P.SHORE.buffer(0.3), Point(*P.YCOL_BASE).buffer(1.5)]
+                                + [Point(*c).buffer(0.5) for c in cols])
+    out = []
+    for part in parts:
+        if part.area < 5:
+            continue
+        ring = ccw(resample_ring(part.exterior.coords, 0.25))
+        ok = ~shapely.contains_xy(avoid, ring[:, 0], ring[:, 1])
+        if ok.all():
+            out.append(np.vstack([ring, ring[:1]]))
+            continue
+        k0 = int(np.argmin(ok))                     # 从一个断开处起算，避免首尾相接的一段被拆成两段
+        ring, ok = np.roll(ring, -k0, 0), np.roll(ok, -k0)
+        out += [ring[r] for r in _runs(ok) if len(r) >= 4]
+    return out
+
+
+def shore_railing_paths(inset=0.35, reach=150.0):
+    """湖岸步道临水边的栏杆：入口广场两侧与栈桥接岸处留口。"""
+    edge = shapely.geometry.LineString(P.SHORE_LINE)
+    pts = P.resample_open(np.asarray(edge.coords), 0.25)
+    t = np.gradient(pts, axis=0); t /= np.linalg.norm(t, axis=1, keepdims=True)
+    nrm = np.stack([t[:, 1], -t[:, 0]], 1)
+    mid = len(pts) // 2
+    if not shapely.contains_xy(P.SHORE, *(pts[mid] + nrm[mid] * 2.0)):
+        nrm = -nrm                                    # 指向陆地
+    q = pts + nrm * inset
+    ok = (np.linalg.norm(q - P.LANDING_C, axis=1) < reach) & ~shapely.contains_xy(P.BRIDGE.buffer(2.2), q[:, 0], q[:, 1])
+    return [q[r] for r in _runs(ok) if len(r) >= 4]
+
+
+def build_edge_railings(M, parent):
+    coll = collection("Plinth_EdgeRailings", parent)
+    g, m = MeshBuf(), MeshBuf()
+    for pts in edge_railing_paths():
+        balustrade(g, m, pts, P.FFL, height=1.05, panel=1.5)
+    g.build("Plinth_EdgeBalustrade_Glass", coll, [M["glass_rail"]], smooth=False)
+    m.build("Plinth_EdgeBalustrade_Rail", coll, [M["metal"]], smooth=True)
+    return coll
+
+
 # =================================================================== 疏散楼梯间 + 服务用房
 def _roof_under_or_nearest(roof, pts, drop=0.03):
     """屋面主梁底标高；屋面范围以外的点取最近的屋面内点（楼梯间顶在檐口外延续同一高度）。"""
