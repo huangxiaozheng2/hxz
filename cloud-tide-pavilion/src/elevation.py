@@ -73,6 +73,8 @@ def main(blend, out_png, side="south", samples=48, scale=1.0, lines=True):
         "wall": ((0.93, 0.915, 0.89), 1.0), "wood": ((0.86, 0.76, 0.62), 1.0), "metal": ((0.74, 0.74, 0.74), 1.0),
         "glass": ((0.80, 0.87, 0.90), 0.38), "water": ((0.84, 0.89, 0.91), 1.0), "people": ((0.35, 0.35, 0.36), 1.0),
         "leaf": ((0.70, 0.76, 0.62), 1.0), "bark": ((0.45, 0.40, 0.35), 1.0), "stone": ((0.86, 0.85, 0.83), 1.0)}.items()}
+    nolines = bpy.data.collections.new("Elev_NoLines")
+    sc.collection.children.link(nolines)
     for o in bpy.data.objects:
         if o.type == "LIGHT":
             o.hide_render = True
@@ -84,6 +86,7 @@ def main(blend, out_png, side="south", samples=48, scale=1.0, lines=True):
             continue
         if o.name.startswith("Water"):
             o.visible_camera = False
+            nolines.objects.link(o)                     # 水面也不画线（否则水平面边缘会成一条通长线）
         m = classify(o.name, mats)
         o.data.materials.clear()
         o.data.materials.append(m)
@@ -124,6 +127,7 @@ def main(blend, out_png, side="south", samples=48, scale=1.0, lines=True):
     ls = fs.linesets[0] if fs.linesets else fs.linesets.new("Lines")
     ls.select_by_visibility = True
     ls.select_silhouette = True; ls.select_border = True; ls.select_crease = True
+    ls.select_by_collection = True; ls.collection = nolines; ls.collection_negation = "EXCLUSIVE"
     ls.linestyle.color = (0.17, 0.165, 0.155)
     ls.linestyle.thickness = 1.6 * scale
     sc.render.filepath = out_png

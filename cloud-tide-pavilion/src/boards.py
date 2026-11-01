@@ -426,31 +426,52 @@ def board5(R, D, out):
     im.save(out, quality=92)
 
 
+CONSTRUCTION = [
+    ("屋面", "20 厚 GRC 面层 + 防水卷材 + 120 厚挤塑保温 + 轻钢龙骨；板下钢拉杆水平支撑，屋面成为刚性隔板"),
+    ("屋檐", "楔形截面，边缘收薄到 150，半圆形拉丝金属包边；檐下 120 阴影缝，梁与格栅端部收于缝内"),
+    ("排水", "距檐口 0.45–0.75 m 一圈余弦形浅槽 + 金属格栅 + 虹吸雨水斗；DN100 立管藏于钢柱与承重墙内，汇入基座蓄水池"),
+    ("幕墙", "50×130 竖梃，8+12A+8 Low-E 中空夹胶玻璃，分格约 1.5 m；顶部金属收口带封至梁底，内侧暗藏灯带"),
+    ("展廊外墙", "象牙白矿物质实墙，四处两跨宽框景窗，外挑 0.62 m 古铜色深窗框"),
+    ("栏杆", "12+12 夹胶玻璃分段 + φ48 扶手，高 1.05 m；屋面平台、栈桥与首层平台临水边、湖岸步道"),
+    ("潮池", "四级石砌台阶，高潮位以下石材颜色加深、表面湿润，低潮时显出潮痕"),
+]
+
+
 def board6(R, D, out):
-    """立面 · 剖面 · 构造：左栏南立面与 2-2 剖面，右栏 1:20 檐口节点。"""
+    """立面 · 剖面 · 构造：左栏南立面、2-2 剖面与构造做法，右栏竖版 1:20 檐口节点。"""
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
     header(d, "云上潮汐馆", "南立面  ·  2-2 剖面  ·  檐口节点 1:20", "06 / 06  立面与构造")
     top = 290
+    avail = H - M - top
+    det = trimmed(f"{D}/detail_eave_tall.png")
+    right_w = int(avail * det.width / det.height)
+    left_w = W - 2 * M - right_w - 80
     elev = trimmed(f"{D}/elevation_south.png")
     sec = trimmed(f"{D}/section_2.png")
-    det = trimmed(f"{D}/detail_eave.png")
-    avail = H - M - top
-    right_w = 1460
-    left_w = W - 2 * M - right_w - 70
     he = int(left_w * elev.height / elev.width)
     hs = int(left_w * sec.height / sec.width)
-    if he + hs + G > avail:
-        k = (avail - G) / (he + hs)
-        he, hs = int(he * k), int(hs * k)
-    gap = max(G, avail - he - hs)
-    im.paste(fit(elev, left_w, he), (M, top))
-    d.line([(M, top + he + gap // 2), (M + left_w, top + he + gap // 2)], fill=(214, 207, 197), width=2)
-    im.paste(fit(sec, left_w, hs), (M, top + he + gap))
-    x0 = M + left_w + 70
-    d.line([(x0 - 35, top), (x0 - 35, H - M)], fill=(214, 207, 197), width=2)
-    hd = min(int(right_w * det.height / det.width), avail)
-    im.paste(fit(det, right_w, hd), (x0, top + (avail - hd) // 2))
+    rule = (214, 207, 197)
+    y = top
+    im.paste(fit(elev, left_w, he), (M, y))
+    y += he + G
+    d.line([(M, y), (M + left_w, y)], fill=rule, width=2)
+    y += G
+    im.paste(fit(sec, left_w, hs), (M, y))
+    y += hs + G
+    d.line([(M, y), (M + left_w, y)], fill=rule, width=2)
+    y += G + 14
+    d.text((M + 20, y), "构造做法", font=font(40), fill=INK)
+    y += 72
+    kw = 190
+    for k, v in CONSTRUCTION:
+        d.text((M + 20, y), k, font=font(28), fill=ACCENT)
+        y = para(d, (M + 20 + kw, y), v, 27, left_w - kw - 40, lh=1.4) + 8
+    if y > H - M:
+        print("board6: 构造做法超出版面", y - (H - M), "px")
+    x0 = W - M - right_w
+    d.line([(x0 - 40, top), (x0 - 40, H - M)], fill=rule, width=2)
+    im.paste(fit(det, right_w, avail), (x0, top))
     im.save(out, quality=92)
 
 

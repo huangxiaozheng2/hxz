@@ -695,9 +695,10 @@ def section_cross(path, env=False):
 DETAIL_DEG = 300.0                                 # 门厅外檐（与“檐口细部”效果图同一处）
 
 
-def detail_eave(path):
+def detail_eave(path, portrait=False):
     """1:20 节点：门厅外檐。屋面构造、楔形挑檐与包边、阴影缝、檐沟与虹吸排水、胶合木主梁与木格栅、
-    钢箱环梁与柱头、幕墙收口、地面构造、基座挑檐与临水玻璃栏板。尺寸取自模型。"""
+    钢箱环梁与柱头、幕墙收口、地面构造、基座挑檐与临水玻璃栏板。尺寸取自模型。
+    portrait=True 时为竖版（说明列在图下方），供图板右栏使用。"""
     import program as PG
     th = math.radians(DETAIL_DEG)
     d = np.array([math.cos(th), math.sin(th)])
@@ -873,13 +874,29 @@ def detail_eave(path):
         ax.add_patch(Circle((xa, ya), 0.018, fc=SUN, ec="none", zorder=10))
         ax.add_patch(Circle((tx, ty), 0.075, fc=PAPER, ec=SUN, lw=0.8, zorder=10))
         ax.text(tx, ty, f"{k + 1}", ha="center", va="center", fontsize=7.5, color=SUN, zorder=11)
-        fy = ys[k]
-        fig.text(0.70, fy, f"{k + 1:>2}", fontsize=9.5, color=SUN, va="center")
-        fig.text(0.725, fy, txt, fontsize=9.5, color=INK, va="center")
     scale_bar(ax, x0 + 0.1, y0 + 0.18, units=(0, 0.5, 1), h=0.04, label_size=8, unit_gap=0.08, label_gap=0.06)
-    fig.text(0.04, 0.955, "节点大样 1:20 · 门厅外檐", fontsize=18, color=INK)
-    fig.text(0.04, 0.93, "楔形挑檐、阴影缝与檐沟排水；屋面荷载经胶合木主梁 → 钢箱环梁 → 柱；尺寸取自模型（方位 300° 径向剖切）",
-             fontsize=10, color=MUTED)
+    title = "节点大样 1:20 · 门厅外檐"
+    sub = ["楔形挑檐、阴影缝与檐沟排水；屋面荷载经胶合木主梁 → 钢箱环梁 → 柱", "尺寸取自模型（方位 300° 径向剖切）"]
+    if portrait:                                         # 竖版：图在上，说明在下
+        Wf = 8.4
+        dh = 0.92 * Wf * (y1 - y0) / (x1 - x0)
+        head, gap, row = 1.15, 0.25, 0.26
+        Hf = head + dh + gap + row * len(items) + 0.15
+        fig.set_size_inches(Wf, Hf)
+        ax.set_position([0.04, (Hf - head - dh) / Hf, 0.92, dh / Hf])
+        fig.text(0.04, (Hf - 0.36) / Hf, title, fontsize=18, color=INK, va="center")
+        for k, t in enumerate(sub):
+            fig.text(0.04, (Hf - 0.66 - 0.21 * k) / Hf, t, fontsize=10, color=MUTED, va="center")
+        for k, (_, txt) in enumerate(items):
+            fy = (Hf - head - dh - gap - row * (k + 0.5)) / Hf
+            fig.text(0.05, fy, f"{k + 1:>2}", fontsize=9.5, color=SUN, va="center")
+            fig.text(0.09, fy, txt, fontsize=9.5, color=INK, va="center")
+    else:
+        for k, (_, txt) in enumerate(items):
+            fig.text(0.70, ys[k], f"{k + 1:>2}", fontsize=9.5, color=SUN, va="center")
+            fig.text(0.725, ys[k], txt, fontsize=9.5, color=INK, va="center")
+        fig.text(0.04, 0.955, title, fontsize=18, color=INK)
+        fig.text(0.04, 0.93, "；".join(sub), fontsize=10, color=MUTED)
     fig.savefig(path, facecolor=PAPER)
     plt.close(fig)
 
@@ -1133,7 +1150,9 @@ def elevation_drawing(raw, path, notes=ELEV_NOTES):
     fig = plt.figure(figsize=(16, 6), dpi=200, facecolor=PAPER)
     ax = fig.add_axes([0.03, 0.03, 0.94, 0.8])
     ax.set_xlim(xa, xb); ax.set_ylim(za, zb); ax.set_aspect("equal"); ax.axis("off")
-    ax.imshow(img, extent=(u0, u1, z0, z1), zorder=3, interpolation="antialiased")
+    xr = 21.5                                              # 右侧只到标高线起点：其外只有水面（旧底图里水面边缘有一道线）
+    img = img[:, :int(round((xr - u0) * meta["px_per_m"]))]
+    ax.imshow(img, extent=(u0, xr, z0, z1), zorder=3, interpolation="antialiased")
     # 水体在立面前方：设计高潮位以下以半透明浅蓝覆盖，没入水中的台基仍隐约可见
     zw = -2.5
     ax.add_patch(MPoly([(xa, zw), (21.5, zw), (21.5, P.HIGH_TIDE), (xa, P.HIGH_TIDE)], closed=True, fc=WATER_HT,
@@ -1588,6 +1607,7 @@ if __name__ == "__main__":
     location_map(os.path.join(out, "location.png"))
     section_cross(os.path.join(out, "section_2.png"))
     detail_eave(os.path.join(out, "detail_eave.png"))
+    detail_eave(os.path.join(out, "detail_eave_tall.png"), portrait=True)
     form_diagram(os.path.join(out, "form.png"))
     env_diagram(os.path.join(out, "environment.png"))
     section(os.path.join(out, "section.png"))
