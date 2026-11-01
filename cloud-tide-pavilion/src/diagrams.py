@@ -1427,6 +1427,10 @@ def plan_ground(path):
         fill_poly(ax, ring, fc=WATER_HT if z < P.HIGH_TIDE else "#e6dfd3", ec="#a59e93", lw=0.5, zorder=2)
     fill_poly(ax, Point(0, 0).buffer(P.BASIN_STEPS[-1][1], 128).union(P.CHANNEL.intersection(P.PLINTH_ALL.buffer(0.4))),
               fc=WATER_HT, ec="#a59e93", lw=0.5, zorder=2)
+    import architecture as A                          # 临水栏杆：与模型同一套路线
+    rails = A.edge_railing_paths()
+    for pts in rails:
+        ax.plot(pts[:, 0], pts[:, 1], color=INK, lw=1.0, zorder=4, solid_capstyle="butt")
     ax.add_patch(Circle(P.TREE_POS, P.TREE_ISLAND_R, fc="#c9cdb2", ec="#7f8466", lw=0.6, zorder=3))
     ax.add_patch(Circle(P.SCULPT_POS, 0.95, fc="white", ec=INK, lw=0.6, zorder=3))
     # 室内地面
@@ -1517,6 +1521,8 @@ def plan_ground(path):
     note(P.YCOL_BASE, "Y 形斜柱石墩", (-23.5, -15.0))
     note(P.C_PIERS[1], "水中石墩", (21.0, 2.0))
     ax.text(2.4, -22.5, "栈桥 · 主入口", fontsize=9, color=INK, zorder=10)
+    rp = min((q for r in rails for q in r), key=lambda q: np.hypot(q[0] - 14.0, q[1] + 11.0))
+    note(tuple(rp), "临水玻璃栏板 h = 1.05 m", (15.0, -19.0))
     ax.text(-23.5, -21.0, "→ 疏散：展廊两处庭院门、门厅南门与庭院门，经环形步道至栈桥\n   虚线为距出口最远点的步行路线", fontsize=9,
             color=SUN, zorder=10)
     ax.text(-23.5, -23.3, f"任一点到最近对外门：步行 ≤ {eg['walk_max']:.0f} m，直线 ≤ {eg['straight_max']:.0f} m", fontsize=9,
