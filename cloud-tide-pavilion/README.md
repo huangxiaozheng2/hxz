@@ -8,10 +8,11 @@
 ![展板四](renders/board_04.jpg)
 ![展板五](renders/board_05.jpg)
 ![展板六](renders/board_06.jpg)
+![展板七](renders/board_07.jpg)
 
 ## 设计说明
 
-**区位与到达。** 设定场地为北纬 30° 的一处湖泊。展馆离西南岸约 67 m，由湖岸公园的入口广场经约 80 m 的栈桥到达。湖岸公园有石砌驳岸、6 m 宽的滨水步道、入口广场与通往滨湖路的园路；步道内侧一排垂柳，其后是成片的阔叶大树、灌木与松。岸线刻意避开冬至日落方向，夕阳仍落在开阔水面上。
+**区位与到达。** 设定场地为北纬 30° 的一处湖泊。展馆离西南岸约 67 m，由湖岸公园的入口广场经约 80 m 的栈桥到达。湖岸公园有石砌驳岸、6 m 宽的滨水步道、入口广场与通往滨湖路的园路；步道内侧种垂柳，其后是成片的阔叶大树、灌木与松，种植只在岸线与滨湖路之间。岸线刻意避开冬至日落方向，夕阳仍落在开阔水面上。
 
 **潮汐庭院。** 三片月牙屋顶交错环抱一座阶梯式潮池。潮池经西南的水口与外部水面相通，一日两涨两落：设计高潮位 ±0.00 时池水漫至第三级台阶，低潮位 -0.95 时整池露底、留下潮痕。树岛立在池中，磨砂玻璃雕塑立在池底石台上，高潮时下半段没入水中。
 
@@ -29,7 +30,7 @@
 
 | 项目 | 数值 |
 |---|---|
-| 室内面积 | 约 397 m²：展廊 233、门厅 60、卫生间 11、储藏 3、疏散楼梯间 20、电梯 4、观景厅 46；另有屋面平台 101 m²、基座内设备间 27 m² |
+| 室内面积 | 围护以内约 397 m²（含墙体与电梯筒）；各房间净面积：展廊 233、门厅 60、卫生间 11、储藏 3、疏散楼梯间 20、电梯 4、观景厅 46，合计约 377 m²；另有屋面平台 101 m²、基座内设备间 27 m² |
 | 区位 | 设定场地：北纬 30° 湖泊；离西南岸约 67 m，栈桥约 80 m |
 | 潮位 | 设计高潮位 ±0.00，低潮位 -0.95，潮差 0.95 m |
 | 标高 | 首层 +0.85（高出高潮位 0.85 m），屋面平台 +6.30，主屋顶西翼尖 +11.2，次屋顶最高点约 +12.2 |
@@ -101,7 +102,7 @@ cloud-tide-pavilion/
 ├── model/
 │   ├── cloud_tide_pavilion.blend   完整场景（集合分组、材质、灯光、相机）
 │   └── cloud_tide_pavilion.glb     建筑、庭院、室内陈设、人物与湖岸配景（简化 PBR 材质；配景树叶抽稀，人物减面、发丝以发型体块代替，不含水面与远山）
-├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、潮位、支承与抗侧力）；结构轴测图；立面线稿底图 elevation_south_raw.png；六张展板 board_01–06.jpg
+├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、日照分析、爆炸轴测、潮位、支承与抗侧力）；结构轴测图；立面与爆炸轴测的线稿底图（*_raw.png）；日照计算结果 solar.json；种植位置 planting.json；七张展板 board_01–07.jpg
 └── src/
     ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥
     ├── facade.py        幕墙分格、实墙段、框景窗与门的位置
@@ -117,7 +118,9 @@ cloud-tide-pavilion/
     ├── diagrams.py      区位图、总平面与日落轴线、首层与屋面平台平面（含疏散路线）、1-1 长剖面与 2-2 横剖面、南立面（在线稿底图上加水体、标高与标注）、1:20 檐口节点、形体生成、环境策略、潮位曲线、支承距离与抗侧力图
     ├── struct_axo.py    结构轴测图（屋面半透明，承重构件着色）与标注锚点
     ├── elevation.py     立面线稿底图：正交相机 + Freestyle 线稿 + 浅色材质，透明底；栈桥在台基南缘外剖切
-    ├── boards.py        六张 A1 展板排版（概念、技术、平面与流线、结构、生成与环境、立面与构造）
+    ├── exploded.py      爆炸轴测线稿底图：基座、首层、主屋顶与低檐、观景厅、次屋顶分层抬开，柱与环梁按高度归层
+    ├── solar.py         日照分析：北纬 30° 冬至、春秋分、夏至，在模型上逐点向太阳做光线追踪，得到首层与潮池的日照时数与逐时被晒面积
+    ├── boards.py        七张 A1 展板排版（概念、技术、平面与流线、结构、生成与环境、立面与构造、分层日照与材料）
     └── export_glb.py    导出 GLB（网页版由 gltf-transform 以 meshopt 压缩，保留构件名，便于网页中按构件剖切）
 ```
 
@@ -141,10 +144,12 @@ CloudTidePavilion
 ```bash
 python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib
 cd cloud-tide-pavilion
-../venv/bin/python src/build.py model/cloud_tide_pavilion.blend
+PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend   # 同时导出种植位置给区位图
 ../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders hero,approach,arrival,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
 ../venv/bin/python src/struct_axo.py model/cloud_tide_pavilion.blend renders/struct_axo.png --samples=64
 ../venv/bin/python src/elevation.py model/cloud_tide_pavilion.blend renders/elevation_south_raw.png --side=south --samples=48   # Freestyle 线稿较慢，约 20 分钟
+../venv/bin/python src/exploded.py model/cloud_tide_pavilion.blend renders/exploded_raw.png --samples=32
+../venv/bin/python src/solar.py model/cloud_tide_pavilion.blend renders/solar.json   # 约 40 秒
 ../venv/bin/python src/diagrams.py renders
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb

@@ -605,10 +605,11 @@ class _Variants:
     """配景树的变体库：每种变体只建一次（建在原点），其余位置用共享网格数据的实例，几何不重复存储。"""
 
     def __init__(self, coll):
-        self.coll, self.cache, self.count = coll, {}, {}
+        self.coll, self.cache, self.count, self.log = coll, {}, {}, []
 
     def place(self, key, make, name, loc, rot_z, scale):
         import bpy
+        self.log.append(dict(kind=key[0], x=round(float(loc[0]), 2), y=round(float(loc[1]), 2), scale=round(float(scale), 3)))
         if key not in self.cache:
             objs = [o for o in make() if o is not None]
             self.cache[key] = objs
@@ -711,8 +712,11 @@ def build_shore(M, coll, tcoll, rock):
         ang = abs((math.atan2(v[1], v[0]) - view + math.pi) % (2 * math.pi) - math.pi)
         return dist < 70 and ang < math.radians(24)
 
+    park = P.PARK.buffer(-6.0)                        # 只在岸线与滨湖路之间种（离路 6 m 以上）
+
     def ok(p, gap, inset=9.0):
-        return (P.SHORE.buffer(-inset).contains(Point(*p)) and not paved.buffer(2.2).contains(Point(*p))
+        return (P.SHORE.buffer(-inset).contains(Point(*p)) and park.contains(Point(*p))
+                and not paved.buffer(2.2).contains(Point(*p))
                 and all(np.linalg.norm(p - q) > gap for q in placed) and not in_view(p))
     for k, (p, hgt) in enumerate((((-76.5, -79.5), 8.6), ((-71.0, -83.0), 9.4))):
         p = np.array(p)
@@ -781,13 +785,20 @@ def build_shore(M, coll, tcoll, rock):
         if nsh >= 46:
             break
         q = p + rng.normal(0, 1, 2) * 2.6
-        if (not P.SHORE.buffer(-4.0).contains(Point(*q)) or paved.buffer(1.4).contains(Point(*q))
-                or in_view(q)):
+        if (not P.SHORE.buffer(-4.0).contains(Point(*q)) or not park.contains(Point(*q))
+                or paved.buffer(1.4).contains(Point(*q)) or in_view(q)):
             continue
         vi = nsh % 6
         lib.place(("shrub", vi), lambda vi=vi: shrub(vi), f"Shore_Shrub{nsh}", (q[0], q[1], float(ground(q[None], 0.04)[0])),
                   rng.uniform(0, 2 * np.pi), rng.uniform(0.7, 1.3))
         nsh += 1
+    import os
+    if os.environ.get("PLANTING_JSON"):                 # 种植位置导出给区位图（不影响模型）
+        import json
+        log = lib.log + [dict(kind="tree", x=round(float(p[0]), 2), y=round(float(p[1]), 2), scale=1.0)
+                         for p in placed[:2]]
+        with open(os.environ["PLANTING_JSON"], "w") as f:
+            json.dump(log, f)
 
 
 def build_mountains(M, coll):

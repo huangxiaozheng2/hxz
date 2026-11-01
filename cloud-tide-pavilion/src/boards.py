@@ -118,7 +118,7 @@ def trimmed(path, pad=30):
 def board1(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 06  概念与形象")
+    header(d, "云上潮汐馆", "CLOUD TIDE PAVILION  ·  从潮到云", "01 / 07  概念与形象")
     top = 290
     left_w = 1060
     x0 = M + left_w + 70
@@ -174,7 +174,7 @@ def board1(R, D, out):
 def board2(R, D, out):
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 06  技术与细部")
+    header(d, "云上潮汐馆", "空间  ·  潮汐  ·  构造", "02 / 07  技术与细部")
     top = 290
     # 第一行：总平面 + 长剖面
     row1_h = 1180
@@ -276,7 +276,7 @@ def board4(R, D, out):
     import structure as ST
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  抗侧力  ·  初步校核", "04 / 06  结构")
+    header(d, "云上潮汐馆", "结构体系  ·  荷载路径  ·  抗侧力  ·  初步校核", "04 / 07  结构")
     top = 290
     left_w = 2560
     sm = trimmed(f"{D}/support_map.png")
@@ -363,7 +363,7 @@ def board3(R, D, out):
     import program as PG
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "平面  ·  功能  ·  疏散与无障碍", "03 / 06  平面与流线")
+    header(d, "云上潮汐馆", "平面  ·  功能  ·  疏散与无障碍", "03 / 07  平面与流线")
     top = 290
     avail = H - M - top
     gp = trimmed(f"{D}/plan_ground.png")
@@ -409,7 +409,7 @@ def board5(R, D, out):
     """生成与环境：上为形体生成四步，下为环境策略剖面（图例在图内），两图通栏。"""
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "形体生成  ·  环境策略", "05 / 06  生成与环境")
+    header(d, "云上潮汐馆", "形体生成  ·  环境策略", "05 / 07  生成与环境")
     top = 290
     form = trimmed(f"{D}/form.png")
     env = trimmed(f"{D}/environment.png")
@@ -441,7 +441,7 @@ def board6(R, D, out):
     """立面 · 剖面 · 构造：左栏南立面、2-2 剖面与构造做法，右栏竖版 1:20 檐口节点。"""
     im = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(im)
-    header(d, "云上潮汐馆", "南立面  ·  2-2 剖面  ·  檐口节点 1:20", "06 / 06  立面与构造")
+    header(d, "云上潮汐馆", "南立面  ·  2-2 剖面  ·  檐口节点 1:20", "06 / 07  立面与构造")
     top = 290
     avail = H - M - top
     det = trimmed(f"{D}/detail_eave_tall.png")
@@ -475,6 +475,98 @@ def board6(R, D, out):
     im.save(out, quality=92)
 
 
+def _lin2srgb(c):
+    return tuple(int(round(255 * (v * 12.92 if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055))) for v in c)
+
+
+MATERIAL_CARDS = [  # (标题, 说明, 规格色（线性 RGB）, 取景图, 裁切框)
+    ("象牙白 GRC · 矿物涂料", "屋面面层与展廊实墙", (0.86, 0.835, 0.79), "gallery", (470, 81, 970, 471)),
+    ("胶合木 GL28h", "主梁约 1.5 m 一根，100 mm 木格栅", (0.74, 0.60, 0.45), "structure", (700, 91, 1200, 481)),
+    ("拉丝香槟金属", "檐口包边、扶手、Y 形斜柱", (0.78, 0.76, 0.72), "axis_out", (820, 291, 1320, 681)),
+    ("Low-E 中空夹胶玻璃", "幕墙分格约 1.5 m，顶部金属收口", (0.93, 0.965, 0.96), "detail", (650, 361, 1150, 751)),
+    ("潮池石材", "高潮位以下颜色加深、表面湿润", (0.70, 0.675, 0.63), "court_lt", (700, 281, 1200, 671)),
+    ("花岗岩铺装", "栈桥与湖岸步道", (0.37, 0.345, 0.31), "arrival", (520, 610, 1020, 1000)),
+]
+
+
+def material_cards(R, width, cols=3, gap=26):
+    """材料卡：实际渲染图里的局部 + 规格色块 + 名称与用途。"""
+    cw = (width - gap * (cols - 1)) // cols
+    ih = int(cw * 390 / 500)                         # 与裁切框同比例，不拉伸
+    rows = (len(MATERIAL_CARDS) + cols - 1) // cols
+    ch = ih + 130
+    out = Image.new("RGB", (width, rows * ch + (rows - 1) * gap), PAPER)
+    d = ImageDraw.Draw(out)
+    for k, (title, note, col, src, box_) in enumerate(MATERIAL_CARDS):
+        x, y = (k % cols) * (cw + gap), (k // cols) * (ch + gap)
+        crop = shot(R, src).crop(box_).resize((cw, ih), Image.LANCZOS)
+        out.paste(crop, (x, y))
+        rgb = _lin2srgb(col)
+        d.rectangle([x, y + ih + 14, x + 54, y + ih + 68], fill=rgb, outline=(190, 183, 172))
+        d.text((x + 72, y + ih + 10), title, font=font(30), fill=INK)
+        d.text((x + 72, y + ih + 52), note, font=font(23), fill=MUTED)
+        d.text((x + 72, y + ih + 86), "#%02x%02x%02x" % rgb, font=font(20), fill=MUTED)
+    return out
+
+
+def key_figures(R):
+    """关键数据（由几何、疏散与日照计算得到）。"""
+    import json
+    import program as PG
+    figs = []
+    enclosed = P.E1.area + P.E2.area + P.E3.area + P.STAIR2.area          # 与第一张图板同一口径：围护以内
+    figs.append((f"{enclosed:.0f} m²", "室内面积（围护以内，含墙体与电梯筒）"))
+    figs.append((f"{P.SOLSTICE_SUNSET_AZ}°", "冬至日落方位：水口 · 潮池 · 月洞墙"))
+    sj = os.path.join(R, "solar.json")
+    if os.path.exists(sj):
+        with open(sj) as f:
+            S = json.load(f)
+        import numpy as np
+        pool = np.array(S["pool"])
+        noon = lambda name, i: float(np.array(S["days"][name]["series"])[
+            np.argmin(abs(np.array(S["days"][name]["series"])[:, 0] - 12)), i]) * 100
+        figs.append((f"{noon('winter', 4):.0f}% / {noon('summer', 4):.0f}%", "正午门厅地面有直射阳光：冬至 / 夏至"))
+        figs.append((f"{np.array(S['days']['winter']['hours'])[pool].mean():.1f} h", "冬至潮池水面平均直射日照"))
+    eg = PG.ground_egress()
+    figs.append((f"≤ {eg['walk_max']:.0f} m", "首层任一点到对外门的步行距离"))
+    return figs
+
+
+def board7(R, D, out):
+    """分层 · 日照 · 材料：左为爆炸轴测，右上为日照分析，右下为材料卡，底部为关键数据。"""
+    im = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(im)
+    header(d, "云上潮汐馆", "分层构成  ·  日照分析  ·  材料", "07 / 07  分层、日照与材料")
+    top = 290
+    exp = trimmed(f"{D}/exploded.png")
+    sol = trimmed(f"{D}/solar.png")
+    le = 2250
+    he = int(le * exp.height / exp.width)
+    im.paste(fit(exp, le, he), (M, top))
+    x0 = M + le + 70
+    rw = W - M - x0
+    hs = int(rw * sol.height / sol.width)
+    im.paste(fit(sol, rw, hs), (x0, top))
+    rule = (214, 207, 197)
+    d.line([(x0 - 35, top), (x0 - 35, top + he)], fill=rule, width=2)
+    y = top + hs + 50
+    d.text((x0, y), "材料", font=font(40), fill=INK)
+    d.text((x0 + 110, y + 12), "取自渲染图的局部；色块为材质规格色", font=font(24), fill=MUTED)
+    cards = material_cards(R, rw)
+    im.paste(cards, (x0, y + 70))
+    yb = max(top + he, y + 70 + cards.height, H - M - 200) + 20
+    d.line([(M, yb - 30), (W - M, yb - 30)], fill=rule, width=2)
+    figs = key_figures(D)
+    cw = (W - 2 * M) // len(figs)
+    for k, (val, lab) in enumerate(figs):
+        x = M + k * cw
+        d.text((x, yb), val, font=font(70), fill=ACCENT)
+        para(d, (x, yb + 98), lab, 25, cw - 40, color=MUTED, lh=1.4)
+    if yb + 170 > H - M + 40:
+        print("board7: 底部关键数据超出版面", yb + 170 - (H - M), "px")
+    im.save(out, quality=92)
+
+
 if __name__ == "__main__":
     R, D, O = sys.argv[1], sys.argv[2], sys.argv[3]
     os.makedirs(O, exist_ok=True)
@@ -485,4 +577,6 @@ if __name__ == "__main__":
     board5(R, D, os.path.join(O, "board_05.jpg"))
     if os.path.exists(f"{D}/elevation_south.png"):
         board6(R, D, os.path.join(O, "board_06.jpg"))
+    if os.path.exists(f"{D}/exploded.png") and os.path.exists(f"{D}/solar.png"):
+        board7(R, D, os.path.join(O, "board_07.jpg"))
     print("boards ->", O)

@@ -181,12 +181,9 @@ def location_map(path):
     frame = box(x0, y0, x1, y1)
     edge = LineString(P.SHORE_LINE)
     land = Polygon(np.vstack([P.SHORE_LINE, [(-400, -420), (260, -420)]])).buffer(0).intersection(frame)
-    from scipy.ndimage import gaussian_filter1d
-    rk = P.resample_open(P.ROAD_KEYS, 2.0)
-    road_line = LineString(np.stack([gaussian_filter1d(rk[:, 0], 8, mode="nearest"),
-                                     gaussian_filter1d(rk[:, 1], 8, mode="nearest")], 1))
+    road_line = P.ROAD_LINE
     fill_poly(ax, land, fc="#e6dfd3", ec="none", zorder=1)
-    # 公园（岸线与滨湖路之间）
+    # 公园（岸线与滨湖路之间，与模型里的种植范围一致）
     park = land.difference(Polygon(np.vstack([np.asarray(road_line.coords), [(260, -420), (-400, -420)]])).buffer(0))
     fill_poly(ax, park, fc="#d5dcc2", ec="none", zorder=2)
     rl = road_line.intersection(frame)
@@ -202,6 +199,16 @@ def location_map(path):
             blk = box(gx + 3, gy + 3, gx + 3 + rng.uniform(16, 24), gy + 3 + rng.uniform(13, 19))
             if city.contains(blk):
                 fill_poly(ax, blk, fc="#d6cec1", ec="none", zorder=3)
+    # 种植（build.py 导出的实际位置）：垂柳、阔叶树、松、灌木
+    pj = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "renders", "planting.json")
+    if os.path.exists(pj):
+        import json
+        with open(pj) as f:
+            plant = json.load(f)
+        style = {"willow": (4.2, "#b9c79a"), "tree": (5.2, "#a9b98a"), "pine": (3.2, "#7f9270"), "shrub": (1.3, "#93a77c")}
+        for t in sorted(plant, key=lambda t: t["kind"] != "shrub"):
+            r, c = style.get(t["kind"], (4.0, "#a9b98a"))
+            ax.add_patch(Circle((t["x"], t["y"]), r * t["scale"], fc=c, ec="#7f8466", lw=0.3, alpha=0.95, zorder=4.5))
     # 驳岸与滨水步道、入口广场、园路
     ex, ey = edge.intersection(frame).xy
     ax.plot(ex, ey, color="#8d877e", lw=1.1, zorder=4)
@@ -1183,6 +1190,226 @@ def elevation_drawing(raw, path, notes=ELEV_NOTES):
     plt.close(fig)
 
 
+SOLAR_DAY = {"winter": ("冬至", "#c8743a"), "summer": ("夏至", "#3d7fb0")}
+SUN_HOURS_RAMP = ["#c9a67b", "#d0853c", "#b8621c", "#92440c", "#6c2b04"]      # 单色相由浅到深（已用色板校验脚本检查）
+SUN_HOURS_BINS = [0, 1, 2, 4, 6, 24]
+
+
+def solar_diagram(src, path):
+    """日照分析：太阳轨迹图（北纬 30°）、潮池与门厅被晒到的面积比例、冬夏至首层日照时数。数据来自 solar.py 的光线追踪。"""
+    import json
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    with open(src) as f:
+        D = json.load(f)
+    X, Y = np.array(D["x"]), np.array(D["y"])
+    pool, lobby = np.array(D["pool"]), np.array(D["lobby"])
+    fig = plt.figure(figsize=(16, 7.9), dpi=200, facecolor=PAPER)
+    # ---- 太阳轨迹（等距方位投影：半径 = 90° - 高度角，北在上）
+    ax = fig.add_axes([0.02, 0.07, 0.31, 0.74])
+    ax.set_aspect("equal"); ax.axis("off"); ax.set_xlim(-104, 104); ax.set_ylim(-104, 104)
+
+    def xy(alt, az):
+        r = 90 - np.asarray(alt)
+        th = np.radians(90 - np.asarray(az))
+        return r * np.cos(th), r * np.sin(th)
+    for a in (0, 15, 30, 45, 60, 75):
+        t = np.linspace(0, 2 * np.pi, 200)
+        ax.plot((90 - a) * np.cos(t), (90 - a) * np.sin(t), color="#c9c2b6", lw=0.8 if a else 1.2, zorder=1)
+        if a:
+            ax.text(2, 90 - a + 1.5, f"{a}°", fontsize=11, color=MUTED, zorder=2)
+    for az, lab in ((0, "北"), (90, "东"), (180, "南"), (270, "西")):
+        x0, y0 = xy(0, az)
+        ax.plot([0, x0], [0, y0], color="#d8d2c7", lw=0.6, zorder=1)
+        x1, y1 = xy(-9, az)
+        ax.text(x1, y1, lab, ha="center", va="center", fontsize=11, color=INK)
+    for name, (lab, col) in list(SOLAR_DAY.items()) + [("equinox", ("春秋分", "#9b948a"))]:
+        dec = D["days"][name]["dec"]
+        t0, t1 = P.day_length(P.LATITUDE, dec)
+        tt = np.linspace(t0, t1, 160)
+        A = np.array([P.sun_vector(P.LATITUDE, dec, t)[1:] for t in tt])
+        px, py = xy(A[:, 0], A[:, 1])
+        ax.plot(px, py, color=col, lw=2.0 if name != "equinox" else 1.0, zorder=4,
+                ls="-" if name != "equinox" else (0, (4, 3)))
+        for hr in range(int(np.ceil(t0)), int(t1) + 1):
+            _, al, az_ = P.sun_vector(P.LATITUDE, dec, hr)
+            hx, hy = xy(al, az_)
+            if name != "equinox":
+                ax.add_patch(Circle((hx, hy), 1.6, fc=PAPER, ec=col, lw=1.2, zorder=5))
+                if hr in (8, 12, 16):
+                    ax.text(hx, hy + 4.2, f"{hr}:00", fontsize=10.5, color=MUTED, ha="center", zorder=6)
+        _, al, _ = P.sun_vector(P.LATITUDE, dec, 12.0)
+        nx, ny = xy(al, 180)
+        ax.text(nx + 3.5, ny - (5 if name == "winter" else 2), f"{lab} 正午 {al:.1f}°" if name != "equinox" else lab,
+                fontsize=10.5, color=col if name != "equinox" else MUTED, ha="left", va="center", zorder=6)
+    sx, sy = xy(0, P.SOLSTICE_SUNSET_AZ)
+    ax.plot([-sx * 0.95, sx], [-sy * 0.95, sy], color=SUN, lw=1.4, ls=(0, (6, 3)), zorder=3)
+    ax.add_patch(Circle((sx, sy), 3.4, fc=SUN, ec="none", zorder=6))
+    ax.text(sx + 5, sy - 6, f"冬至日落 {P.SOLSTICE_SUNSET_AZ}°\n水口 · 潮池 · 月洞墙同向", fontsize=10.5, color=SUN,
+            ha="left", va="top", zorder=6)
+    fig.text(0.03, 0.83, "太阳轨迹 · 北纬 30°（真太阳时）", fontsize=13.5, color=INK)
+    # ---- 被晒到的面积比例（小多图：潮池水面、门厅地面）
+    for k, (key, title, idx) in enumerate((("pool", "潮池水面被晒到的面积", 3), ("lobby", "门厅地面被晒到的面积", 4))):
+        a2 = fig.add_axes([0.38, 0.49 - k * 0.38, 0.27, 0.27])
+        a2.set_facecolor(PAPER)
+        for name, (lab, col) in SOLAR_DAY.items():
+            ser = np.array(D["days"][name]["series"])
+            a2.plot(ser[:, 0], ser[:, idx] * 100, color=col, lw=2.0, solid_capstyle="round", label=lab)
+            i = int(np.argmax(ser[:, idx]))                       # 直接标注放在峰值上方
+            a2.text(ser[i, 0], ser[i, idx] * 100 + 5, f"{lab} {ser[i, idx] * 100:.0f}%", fontsize=10, color=INK,
+                    ha="center", va="bottom")
+        if k == 0:
+            a2.legend(loc="upper right", fontsize=10, frameon=False, handlelength=1.6, labelcolor=INK)
+        a2.set_xlim(4.5, 20); a2.set_ylim(0, 108)
+        a2.set_xticks([6, 9, 12, 15, 18]); a2.set_xticklabels(["6:00", "9:00", "12:00", "15:00", "18:00"], fontsize=11)
+        a2.set_yticks([0, 50, 100]); a2.set_yticklabels(["0", "50%", "100%"], fontsize=11)
+        for sp in ("top", "right"):
+            a2.spines[sp].set_visible(False)
+        for sp in ("left", "bottom"):
+            a2.spines[sp].set_color("#b9b2a6"); a2.spines[sp].set_linewidth(0.8)
+        a2.tick_params(colors=MUTED, length=3)
+        a2.grid(axis="y", color="#e2dcd2", lw=0.6)
+        a2.set_axisbelow(True)
+        a2.set_title(title, fontsize=12.5, color=INK, loc="left", pad=6)
+    fig.text(0.38, 0.83, "一天中被直射阳光照到的面积（光线追踪）", fontsize=13.5, color=INK)
+    # ---- 首层日照时数（冬至 / 夏至）
+    cmap = ListedColormap(SUN_HOURS_RAMP)
+    norm = BoundaryNorm(SUN_HOURS_BINS, cmap.N)
+    for k, name in enumerate(("winter", "summer")):
+        a3 = fig.add_axes([0.70 + k * 0.148, 0.2, 0.14, 0.58])
+        a3.set_aspect("equal"); a3.axis("off"); a3.set_xlim(-21.5, 21.5); a3.set_ylim(-21.5, 21.5)
+        a3.set_anchor("N")
+        hrs = np.array(D["days"][name]["hours"])
+        st = D["step"]
+        from matplotlib.collections import PatchCollection
+        from matplotlib.patches import Rectangle
+        cells = [Rectangle((x - st / 2, y - st / 2), st, st) for x, y in zip(X, Y)]
+        pc = PatchCollection(cells, cmap=cmap, norm=norm, edgecolor="none", zorder=1)
+        pc.set_array(hrs)
+        a3.add_collection(pc)
+        for g in (P.E1, P.E2):
+            line_poly(a3, g, color=INK, lw=0.7, zorder=3)
+        a3.add_patch(Circle((0, 0), P.BASIN_R, fc="none", ec="#2f6fa1", lw=0.8, zorder=3))
+        for roof in P.ROOFS:
+            line_poly(a3, roof.poly, color="#6d6a64", lw=0.5, ls=(0, (3, 2)), zorder=2)
+        lab, col = SOLAR_DAY[name]
+        a3.set_title(f"{lab} · 日照时数", fontsize=12.5, color=INK, loc="left", pad=4)
+        mp, ml = hrs[pool].mean(), hrs[lobby].mean()
+        a3.text(-21, -24.5, f"潮池平均 {mp:.1f} h\n门厅地面平均 {ml:.1f} h", fontsize=10, color=INK, va="top")
+    cax = fig.add_axes([0.70, 0.36, 0.28, 0.022])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, orientation="horizontal",
+                      ticks=SUN_HOURS_BINS[:-1])
+    cb.ax.set_xticklabels(["0", "1", "2", "4", "6 h 以上"], fontsize=11)
+    cb.outline.set_visible(False)
+    cb.ax.tick_params(colors=MUTED, length=0)
+    fig.text(0.70, 0.83, "首层地面与潮池的直射日照时数", fontsize=13.5, color=INK)
+    hw_, hs_ = (np.array(D["days"][n]["hours"]) for n in ("winter", "summer"))
+    fig.text(0.70, 0.29, f"读图：门厅地面冬至平均 {hw_[lobby].mean():.1f} h 直射阳光，夏至只有 {hs_[lobby].mean():.1f} h，\n"
+             f"集中在清晨与傍晚的低角度斜照。潮池夏至反而更晒（{hs_[pool].mean():.1f} h）：\n"
+             f"庭院中央向天空敞开，高角度阳光直落池面。", fontsize=10.5, color=INK, va="top", linespacing=1.6)
+    # ---- 结论（由数据算出）
+    W_, S_ = (np.array(D["days"][n]["series"]) for n in ("winter", "summer"))
+    noon = lambda ser, i: float(ser[np.argmin(abs(ser[:, 0] - 12)), i]) * 100
+    fig.text(0.38, 0.045, f"正午门厅地面：冬至 {noon(W_, 4):.0f}% 有阳光，夏至 {noon(S_, 4):.0f}%（挑檐挡住）；"
+             f"潮池水面：冬至 {noon(W_, 3):.0f}%，夏至 {noon(S_, 3):.0f}%。\n玻璃按透光计，庭院的树参与遮挡，人物与湖岸不计。",
+             fontsize=11, color=INK, va="center", linespacing=1.6)
+    fig.text(0.03, 0.955, "日照分析 · 冬至与夏至", fontsize=18, color=INK, va="center")
+    fig.text(0.03, 0.915, "在模型上逐点向太阳做光线追踪，每 10 分钟一次；首层地面按 0.5 m 网格取样，共 "
+             f"{len(X)} 点", fontsize=11, color=MUTED, va="center")
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
+def _exp_projector():
+    C = P.EXPLODE_CAMERA
+    phi, el = math.radians(C["phi"]), math.radians(C["el"])
+    f = -np.array([math.cos(el) * math.cos(phi), math.cos(el) * math.sin(phi), math.sin(el)])
+    up = np.array([0, 0, 1.0]) - f[2] * f
+    up /= np.linalg.norm(up)
+    X = np.cross(f, up)
+    W, H = C["size"]
+    k = H / C["ortho_scale"]
+    T = np.array(C["target"])
+
+    def px(p):
+        q = np.asarray(p, float) - T
+        return np.array([W / 2 + q @ X * k, H / 2 - q @ up * k])
+    return px, X, up
+
+
+EXPLODE_LABELS = [
+    ("roofB", "B  次屋顶", "胶合木主梁约 1.5 m 一根，其间木格栅；\n楔形挑檐与金属包边"),
+    ("upper", "观景厅 · 月洞墙", "二层柱立在主屋顶结构层上，\n与首层内侧柱上下对齐"),
+    ("roofs", "A  主屋顶 · C  低檐 · 屋面平台", "屋面光缝 8 段；平台四周玻璃栏板"),
+    ("ground", "首层", "展廊 · 门厅 · 1:12 坡道\n电梯筒 · 疏散楼梯间 · Y 形斜柱"),
+    ("base", "基座 · 潮池 · 水口", "四级台阶的潮池经水口与湖面相通；\n栈桥与水中石墩"),
+]
+
+
+def exploded_drawing(raw, path):
+    """爆炸轴测的标注：每层在东侧取锚点引出说明，层间以虚线对位。"""
+    img = plt.imread(raw)
+    H, W = img.shape[:2]
+    px, X, up = _exp_projector()
+    off = P.EXPLODE_OFFSETS
+    geo = {"roofB": [(P.ROOF_B.poly, None)], "roofs": [(P.ROOF_C.poly, None), (P.ROOF_A.poly, None)],
+           "upper": [(P.E3, P.DECK + 1.8)], "ground": [(P.E1, P.FFL + 2.6), (P.E2, P.FFL + 2.6)],
+           "base": [(P.PLINTH_CUT.intersection(Point(0, 0).buffer(22)), P.FFL)]}
+
+    def anchor(key):
+        best = None
+        for poly, z in geo[key]:
+            parts = [poly] if poly.geom_type == "Polygon" else list(poly.geoms)
+            for g in parts:
+                pts = np.asarray(g.exterior.coords)[:, :2]
+                c = np.array(g.centroid.coords[0])
+                for q in pts[::3]:
+                    q2 = q + (c - q) / (np.linalg.norm(c - q) + 1e-9) * 1.6
+                    if not g.contains(Point(*q2)):
+                        continue
+                    if z is None:
+                        roof = next(r for r in P.ROOFS if r.poly.equals(poly))
+                        zz = float(roof.surfaces(np.array([q2[0]]), np.array([q2[1]]))[0][0])
+                    else:
+                        zz = z
+                    p3 = np.array([q2[0], q2[1], zz + off[key]])
+                    score = p3 @ X
+                    if best is None or score > best[0]:
+                        best = (score, px(p3))
+        return best[1]
+    rows = np.where(img[..., 3].max(axis=1) > 0.05)[0]          # 按线稿的实际范围取图幅
+    y0, y1 = rows[0] - 40, rows[-1] + 40
+    x0, x1 = 120, W + 700
+    Hf = 12 * (y1 - y0) / (x1 - x0) / 0.92 + 0.1
+    fig = plt.figure(figsize=(12, Hf), dpi=200, facecolor=PAPER)
+    ax = fig.add_axes([0.0, 0.0, 1.0, (12 * (y1 - y0) / (x1 - x0)) / Hf])
+    ax.set_xlim(x0, x1); ax.set_ylim(y1, y0); ax.set_aspect("equal"); ax.axis("off")
+    ax.imshow(img, extent=(0, W, H, 0), interpolation="antialiased", zorder=2)
+    # 层间对位虚线：同一平面位置在相邻两层的高度
+    pairs = [("base", "ground", (14.0, -5.0, P.FFL)), ("base", "ground", (-11.6, -10.4, P.FFL)),
+             ("ground", "roofs", (P.CORE_C[0], P.CORE_C[1], 6.0)), ("ground", "roofs", (-14.9, -6.9, 6.5)),
+             ("roofs", "upper", (P.MOON_C[0], P.MOON_C[1], P.DECK)), ("upper", "roofB", (P.CORE_C[0], P.CORE_C[1], 9.6))]
+    for l0, l1, p in pairs:
+        a = px(np.array(p) + [0, 0, off[l0]]); b = px(np.array(p) + [0, 0, off[l1]])
+        ax.plot([a[0], b[0]], [a[1], b[1]], color=SUN, lw=0.9, ls=(0, (5, 4)), alpha=0.85, zorder=3)
+    ys = []
+    for key, title, sub in EXPLODE_LABELS:
+        a = anchor(key)
+        y = a[1]
+        if ys and y < ys[-1] + 330:
+            y = ys[-1] + 330
+        ys.append(y)
+        tx = W - 120
+        ax.plot([a[0], tx - 30], [a[1], y], color=INK, lw=0.7, zorder=4)
+        ax.add_patch(Circle(a, 11, fc=SUN, ec="none", zorder=5))
+        ax.text(tx, y - 18, title, fontsize=12.5, color=INK, va="bottom", zorder=5)
+        ax.text(tx, y + 14, sub, fontsize=9.5, color=MUTED, va="top", linespacing=1.5, zorder=5)
+    fig.text(0.03, 1 - 0.36 / Hf, "爆炸轴测 · 分层构成", fontsize=18, color=INK, va="center")
+    fig.text(0.03, 1 - 0.66 / Hf, "自下而上：基座与潮池 → 首层 → 主屋顶与低檐 → 观景厅 → 次屋顶；橙色虚线为层间对位",
+             fontsize=11, color=MUTED, va="center")
+    fig.savefig(path, facecolor=PAPER)
+    plt.close(fig)
+
+
 def tide_curve(path):
     """一日两次涨落（半日潮，周期 12 h 25 min），潮差 0.95 m。"""
     t = np.linspace(0, 24, 600)
@@ -1621,6 +1848,10 @@ if __name__ == "__main__":
     support_map(os.path.join(out, "support_map.png"))
     plan_ground(os.path.join(out, "plan_ground.png"))
     plan_deck(os.path.join(out, "plan_deck.png"))
+    if os.path.exists(os.path.join(out, "exploded_raw.png")):    # exploded.py 的线稿底图
+        exploded_drawing(os.path.join(out, "exploded_raw.png"), os.path.join(out, "exploded.png"))
+    if os.path.exists(os.path.join(out, "solar.json")):          # solar.py 的光线追踪结果
+        solar_diagram(os.path.join(out, "solar.json"), os.path.join(out, "solar.png"))
     raw = os.path.join(out, "elevation_south_raw.png")          # elevation.py 的线稿底图（渲染较慢，单独生成）
     if os.path.exists(raw):
         elevation_drawing(raw, os.path.join(out, "elevation_south.png"))

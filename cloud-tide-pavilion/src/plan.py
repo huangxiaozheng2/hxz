@@ -26,6 +26,26 @@ SOLSTICE_SUNSET_AZ = 242.6
 AXIS_DEG = (90.0 - SOLSTICE_SUNSET_AZ) % 360.0          # 换算为平面极角：207.4°
 AXIS = np.array([math.cos(math.radians(AXIS_DEG)), math.sin(math.radians(AXIS_DEG))])
 AXIS_N = np.array([-AXIS[1], AXIS[0]])
+
+
+# 爆炸轴测（exploded.py 渲染、diagrams.exploded_drawing 标注共用）：各层抬升高度与正交相机
+EXPLODE_OFFSETS = {"base": 0.0, "ground": 6.5, "roofs": 16.0, "upper": 23.5, "roofB": 31.0}
+EXPLODE_CAMERA = dict(phi=-50.0, el=32.0, target=(1.5, 0.0, 16.5), ortho_scale=70.0, size=(2400, 3000))
+
+def sun_vector(lat, dec, hour):
+    """真太阳时 hour 的太阳方向（x 东、y 北、z 上）、高度角与方位角（自北顺时针，度）。"""
+    phi, d, H = math.radians(lat), math.radians(dec), math.radians(15.0 * (hour - 12.0))
+    sin_alt = math.sin(phi) * math.sin(d) + math.cos(phi) * math.cos(d) * math.cos(H)
+    alt = math.asin(max(-1.0, min(1.0, sin_alt)))
+    az = math.atan2(math.sin(H), math.cos(H) * math.sin(phi) - math.tan(d) * math.cos(phi)) + math.pi
+    v = np.array([math.sin(az) * math.cos(alt), math.cos(az) * math.cos(alt), math.sin(alt)])
+    return v, math.degrees(alt), math.degrees(az) % 360
+
+
+def day_length(lat, dec):
+    """日出、日落的真太阳时（不计大气折射）。"""
+    h0 = math.degrees(math.acos(-math.tan(math.radians(lat)) * math.tan(math.radians(dec))))
+    return 12 - h0 / 15, 12 + h0 / 15
 EDGE_T = 0.15       # 屋檐最薄处厚度
 REVEAL = 0.12       # 檐下阴影缝宽度
 
@@ -405,6 +425,19 @@ LANDING = SHORE.intersection(Point(*LANDING_C).buffer(12.0, 64)).difference(_edg
 PARK_PATH = LineString([(-61, -78), (-63, -95), (-58, -120), (-62, -150)]).buffer(1.6)  # 通往城市道路的园路
 ROAD_KEYS = np.array([(-300, -205), (-200, -160), (-120, -128), (-62, -122), (-10, -150), (60, -195), (150, -245),
                       (240, -290)])                                                    # 滨湖路（区位图示意）
+
+
+def _road_park():
+    """滨湖路中心线（平滑）与湖岸公园范围（岸线与滨湖路之间）。种植只在公园内。"""
+    from scipy.ndimage import gaussian_filter1d
+    rk = resample_open(ROAD_KEYS, 2.0)
+    road = LineString(np.stack([gaussian_filter1d(rk[:, 0], 8, mode="nearest"),
+                                gaussian_filter1d(rk[:, 1], 8, mode="nearest")], 1))
+    south = Polygon(np.vstack([np.asarray(road.coords), [(260, -420), (-400, -420)]])).buffer(0)
+    return road, SHORE.difference(south)
+
+
+ROAD_LINE, PARK = _road_park()
 
 
 def _c_horn_water(min_clear=2.4):
