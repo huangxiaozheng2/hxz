@@ -6,6 +6,8 @@
 ![展板二](renders/board_02.jpg)
 ![展板三](renders/board_03.jpg)
 ![展板四](renders/board_04.jpg)
+![展板五](renders/board_05.jpg)
+![展板六](renders/board_06.jpg)
 
 ## 设计说明
 
@@ -30,7 +32,7 @@
 | 室内面积 | 约 397 m²：展廊 233、门厅 60、卫生间 11、储藏 3、疏散楼梯间 20、电梯 4、观景厅 46；另有屋面平台 101 m²、基座内设备间 27 m² |
 | 区位 | 设定场地：北纬 30° 湖泊；离西南岸约 67 m，栈桥约 80 m |
 | 潮位 | 设计高潮位 ±0.00，低潮位 -0.95，潮差 0.95 m |
-| 标高 | 首层 +0.85（高出高潮位 0.85 m），屋面平台 +6.30，主屋顶西翼尖 +11.2 |
+| 标高 | 首层 +0.85（高出高潮位 0.85 m），屋面平台 +6.30，主屋顶西翼尖 +11.2，次屋顶最高点约 +12.2 |
 | 潮池 | 四级台阶（+0.55 / +0.25 / -0.05 / -0.35），池底 -0.65；水口净宽 2.6 m |
 | 坡道 | 1:12，8 段，每段升 0.68 m，段间 1.5 m 休息平台，全长约 78 m；上下两圈净高约 2.5 m |
 | 天光 | 屋面光缝 8 段，宽 0.7 m，沿展廊外墙内侧布置 |
@@ -90,7 +92,7 @@
 | 展廊外墙 | 象牙白矿物质实墙，四处两跨宽的框景窗，外挑 0.62 m 的古铜色深窗框 |
 | 幕墙 | 等宽分段约 1.5 m，顶部金属收口带封至木梁底，室内侧暗藏洗木梁的灯带 |
 | 潮池石材 | 高潮位以下颜色加深、表面湿润，近池底泛淡青褐色，低潮时显出潮痕 |
-| 栏杆 | 分段玻璃（板缝 12 mm）+ φ48 圆管扶手 + 底部压条 |
+| 栏杆 | 屋面平台、栈桥与首层平台临水边、湖岸步道（栈桥两侧各约 150 m）：12+12 夹胶玻璃分段（板缝 12 mm）+ φ48 圆管扶手 + 底部压条，高 1.05 m；在水口、斜柱石墩与上岸处断开 |
 
 ## 文件
 
@@ -99,7 +101,7 @@ cloud-tide-pavilion/
 ├── model/
 │   ├── cloud_tide_pavilion.blend   完整场景（集合分组、材质、灯光、相机）
 │   └── cloud_tide_pavilion.glb     建筑、庭院、室内陈设、人物与湖岸配景（简化 PBR 材质；配景树叶抽稀，不含水面与远山）
-├── renders/                        各机位渲染图、分析图（总平面、首层与平台平面、剖面、潮位、支承与抗侧力）、结构轴测图、四张展板 board_01–04.jpg
+├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、潮位、支承与抗侧力）；结构轴测图；立面线稿底图 elevation_south_raw.png；六张展板 board_01–06.jpg
 └── src/
     ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥
     ├── facade.py        幕墙分格、实墙段、框景窗与门的位置
@@ -111,9 +113,10 @@ cloud-tide-pavilion/
     ├── scene.py         天空（物理天空 + 程序化薄云）、灯光、相机（每个机位带曝光和潮位）
     ├── build.py         总装 → .blend
     ├── render.py        渲染指定机位；按相机切换涨潮/落潮水位，dusk 机位切换为黄昏
-    ├── diagrams.py      区位图、总平面与日落轴线、首层与屋面平台平面（含疏散路线）、沿轴线长剖面、潮位曲线、支承距离与抗侧力图
+    ├── diagrams.py      区位图、总平面与日落轴线、首层与屋面平台平面（含疏散路线）、1-1 长剖面与 2-2 横剖面、南立面（在线稿底图上加水体、标高与标注）、1:20 檐口节点、形体生成、环境策略、潮位曲线、支承距离与抗侧力图
     ├── struct_axo.py    结构轴测图（屋面半透明，承重构件着色）与标注锚点
-    ├── boards.py        四张 A1 展板排版（概念、技术、平面与流线、结构）
+    ├── elevation.py     立面线稿底图：正交相机 + Freestyle 线稿 + 浅色材质，透明底；栈桥在台基南缘外剖切
+    ├── boards.py        六张 A1 展板排版（概念、技术、平面与流线、结构、生成与环境、立面与构造）
     └── export_glb.py    导出 GLB（网页版由 gltf-transform 以 meshopt 压缩，保留构件名，便于网页中按构件剖切）
 ```
 
@@ -124,7 +127,7 @@ CloudTidePavilion
 ├── Architecture
 │   ├── Roofs            Roof_A_Main / Roof_B_Upper / Roof_C_Low（_Shell、_EdgeTrim、_SoffitRibs、_PrimaryBeams_Glulam，A 另有 _Skylight_*）
 │   ├── Envelopes        Envelope_E1_Gallery / E2_Lobby / E3_Belvedere（_Glass、_Mullions_Frames、_SolidWall、_WindowFrames、_CoveLED、_Columns）、Service_WC_Store
-│   ├── Plinth_Terraces  Plinth_And_Bridge、Courtyard_TidalBasin、Roof_Terrace_Deck、Terrace_MoonGate
+│   ├── Plinth_Terraces  Plinth_And_Bridge、Plinth_EdgeRailings（临水栏杆）、Courtyard_TidalBasin、Roof_Terrace_Deck、Terrace_MoonGate
 │   ├── Structure        Structure_LiftCore、Structure_EgressStair（EgressStair_Walls / Flights / FireDoors）、Structure_Supports（Supports_Columns / RingBeams_Steel / YStrut_Steel / StonePiers）
 │   └── Circulation      Courtyard_Ramp、Hall_SpiralStair
 ├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures、Landscape（Water_Surface、Shore_*、Islets、Mountains_*）
@@ -140,6 +143,7 @@ cd cloud-tide-pavilion
 ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend
 ../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders hero,approach,arrival,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
 ../venv/bin/python src/struct_axo.py model/cloud_tide_pavilion.blend renders/struct_axo.png --samples=64
+../venv/bin/python src/elevation.py model/cloud_tide_pavilion.blend renders/elevation_south_raw.png --side=south --samples=48   # Freestyle 线稿较慢，约 20 分钟
 ../venv/bin/python src/diagrams.py renders
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb
