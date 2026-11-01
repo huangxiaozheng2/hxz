@@ -54,14 +54,26 @@ def line_poly(ax, g, **kw):
         ax.plot(x, y, **kw)
 
 
-def scale_bar(ax, x0, y0, units=(0, 5, 10, 20), h=0.5, label_size=9, unit_gap=1.0):
+def scale_bar(ax, x0, y0, units=(0, 5, 10, 20), h=0.5, label_size=9, unit_gap=1.0, label_gap=0.6):
     for a, b in zip(units[:-1], units[1:]):
         k = units.index(a)
         ax.add_patch(MPoly([(x0 + a, y0), (x0 + b, y0), (x0 + b, y0 + h), (x0 + a, y0 + h)], closed=True,
                            fc=INK if k % 2 == 0 else "white", ec=INK, lw=0.8))
     for u in units:
-        ax.text(x0 + u, y0 - 0.6, f"{u}", ha="center", va="top", fontsize=label_size, color=INK)
-    ax.text(x0 + units[-1] + unit_gap, y0 - 0.6, "m", ha="left", va="top", fontsize=label_size, color=INK)
+        ax.text(x0 + u, y0 - label_gap, f"{u}", ha="center", va="top", fontsize=label_size, color=INK)
+    ax.text(x0 + units[-1] + unit_gap, y0 - label_gap, "m", ha="left", va="top", fontsize=label_size, color=INK)
+
+
+def tight_layout(fig, ax, title, subtitle, head=0.85, foot=0.15, width=16.0):
+    """图高由横向比例决定：标题紧贴图上方，底部只留 foot 英寸（图例等另加）。返回图高（英寸）。"""
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    hi = width * 0.94 * (y1 - y0) / (x1 - x0)
+    Hf = head + hi + foot
+    fig.set_size_inches(width, Hf)
+    ax.set_position([0.03, foot / Hf, 0.94, hi / Hf])
+    fig.text(0.03, (Hf - 0.36) / Hf, title, fontsize=18, color=INK, va="center")
+    fig.text(0.03, (Hf - 0.66) / Hf, subtitle, fontsize=11, color=MUTED, va="center")
+    return Hf
 
 
 # ======================================================================= 总平面
@@ -441,8 +453,7 @@ def section(path):
     note((float(np.dot(cp, P.AXIS)), 0.3), "水中石墩（投影）", (-23.5, 1.0))
     for z, txt in ((P.DECK, "+6.30"), (P.FFL, "+0.85 首层"), (P.HIGH_TIDE, "±0.00 设计高潮位"),
                    (P.LOW_TIDE, "-0.95 设计低潮位")):
-        ax.plot([33.2, 33.9], [z, z], color=INK, lw=0.8, zorder=9)
-        ax.text(33.0, z + 0.12, txt, fontsize=9.5, color=INK, ha="right", va="bottom", zorder=9)
+        level_mark(ax, 33.8, z, txt, side="left", run=3.8)
     scale_bar(ax, -23.5, -2.05, units=(0, 2, 5, 10), h=0.25, label_size=8)
     ax.text(-24, 13.2, "东北  ←", fontsize=10, color=MUTED)
     ax.text(34, 13.2, "→  西南（冬至日落方向）", fontsize=10, color=MUTED, ha="right")
@@ -657,7 +668,7 @@ def section_cross(path, env=False):
         note((14.0, P.DECK), "屋面平台 +6.30", (19.0, 7.3))
         note((14.2, 2.4), "展廊", (19.0, 1.6))
         note((-13.0, 2.4), "门厅", (-21.5, 2.6), ha="right")
-        note((0.6, -0.4), "潮池", (2.8, -1.9))
+        note((-1.6, 0.0), "潮池", (-1.0, 3.0))
         note((-6.35, 2.6), "1:12 坡道", (-9.0, 5.4), ha="right")
         note((ts - 1.5, 6.0), "树岛（剖切面后）", (-6.5, 9.9), ha="right")
         for name, txt, xyt in (("Roof_B_Upper", "B  次屋顶", (-4.0, 13.4)), ("Roof_A_Main", "A  主屋顶", (21.0, 10.2)),
@@ -667,14 +678,13 @@ def section_cross(path, env=False):
                 i = len(xs_) // 2
                 note((xs_[i], T_[i]), txt, xyt)
         for z, txt in ((P.DECK, "+6.30"), (P.FFL, "+0.85 首层"), (P.HIGH_TIDE, "±0.00 设计高潮位"), (P.LOW_TIDE, "-0.95 设计低潮位")):
-            ax.plot([s1 - 0.8, s1 - 0.1], [z, z], color=INK, lw=0.8, zorder=9)
-            ax.text(s1 - 1.0, z + 0.12, txt, fontsize=9.5, color=INK, ha="right", va="bottom", zorder=9)
-        scale_bar(ax, s0 + 0.5, -2.05, units=(0, 2, 5, 10), h=0.25, label_size=8)
+            level_mark(ax, s1 - 0.4, z, txt, side="left", run=3.8)
+        ax.set_ylim(-3.9, 14.2)
+        scale_bar(ax, s0 + 0.5, -2.95, units=(0, 2, 5, 10), h=0.2, label_size=8, unit_gap=0.6)
         ax.text(s0, 13.8, "南  ←", fontsize=10, color=MUTED)
         ax.text(s1, 13.8, "→  北", fontsize=10, color=MUTED, ha="right")
-        fig.text(0.03, 0.93, "2-2 剖面 · 门厅—潮池—展廊—疏散楼梯间—观景厅", fontsize=18, color=INK)
-        fig.text(0.03, 0.895, "沿疏散楼梯间中心线（方位 105° / 285°）剖切；浅色为剖切面后的屋顶、柱、月洞墙与树岛",
-                 fontsize=11, color=MUTED)
+        tight_layout(fig, ax, "2-2 剖面 · 门厅—潮池—展廊—疏散楼梯间—观景厅",
+                     "沿疏散楼梯间中心线（方位 105° / 285°）剖切；浅色为剖切面后的屋顶、柱、月洞墙与树岛")
     if path is None:
         return fig, ax, info
     fig.savefig(path, facecolor=PAPER)
@@ -829,8 +839,7 @@ def detail_eave(path):
     dim_v(r_g - 0.55, P.FFL, zu(r_g), f"净高 {zu(r_g) - P.FFL:.2f} m")
     dim_v(rb + 0.18, P.FFL, P.FFL + 1.05, "1.05 m")
     for z, txt in ((P.FFL, "+0.85"), (0.0, "±0.00 设计高潮位"), (P.LOW_TIDE, "-0.95 设计低潮位")):
-        ax.plot([x1 - 0.35, x1 - 0.05], [z, z], color=INK, lw=0.8, zorder=8)
-        ax.text(x1 - 0.05, z + 0.05, txt, ha="right", va="bottom", fontsize=8.5, color=INK, zorder=8)
+        level_mark(ax, x1 - 0.08, z, txt, side="left", h=0.055, run=0.62)
     # 编号引线 + 右侧说明
     items = [
         ((r_e - 1.6, zt(r_e - 1.6) - 0.01), "20 厚 GRC 屋面板，象牙白矿物涂层"),
@@ -867,7 +876,7 @@ def detail_eave(path):
         fy = ys[k]
         fig.text(0.70, fy, f"{k + 1:>2}", fontsize=9.5, color=SUN, va="center")
         fig.text(0.725, fy, txt, fontsize=9.5, color=INK, va="center")
-    scale_bar(ax, x0 + 0.1, y0 + 0.18, units=(0, 0.5, 1), h=0.04, label_size=8, unit_gap=0.08)
+    scale_bar(ax, x0 + 0.1, y0 + 0.18, units=(0, 0.5, 1), h=0.04, label_size=8, unit_gap=0.08, label_gap=0.06)
     fig.text(0.04, 0.955, "节点大样 1:20 · 门厅外檐", fontsize=18, color=INK)
     fig.text(0.04, 0.93, "楔形挑檐、阴影缝与檐沟排水；屋面荷载经胶合木主梁 → 钢箱环梁 → 柱；尺寸取自模型（方位 300° 径向剖切）",
              fontsize=10, color=MUTED)
@@ -1082,17 +1091,9 @@ def env_diagram(path, legend=True):
     # 7 西晒：展廊外墙为实墙；观景厅西侧有月洞墙与深挑檐
     tag(info["ms"] - 2.2, P.DECK + 4.6, 7)
     ax.set_ylim(-2.9, 14.2)
-    # 版面：图高由横向比例决定，标题紧贴图上方，图例（可选）在图下方
-    (x0_, x1_), (y0_, y1_) = ax.get_xlim(), ax.get_ylim()
-    wi = 16 * 0.94
-    hi = wi * (y1_ - y0_) / (x1_ - x0_)
-    head, foot = 0.85, (1.25 if legend else 0.2)
-    Hf = head + hi + foot
-    fig.set_size_inches(16, Hf)
-    ax.set_position([0.03, foot / Hf, 0.94, hi / Hf])
-    fig.text(0.03, (Hf - 0.36) / Hf, "环境策略 · 以 2-2 剖面示意", fontsize=18, color=INK, va="center")
-    fig.text(0.03, (Hf - 0.66) / Hf, "北纬 30°：遮阳、通风、湖水源热泵、雨水回用与天光", fontsize=11, color=MUTED,
-             va="center")
+    foot = 1.25 if legend else 0.2                         # 图例在图下方
+    Hf = tight_layout(fig, ax, "环境策略 · 以 2-2 剖面示意", "北纬 30°：遮阳、通风、湖水源热泵、雨水回用与天光",
+                      foot=foot)
     if legend:
         for k, (name, t) in enumerate(ENV_LEGEND):
             fig.text(0.035 + (k // 4) * 0.47, (foot - 0.3 - (k % 4) * 0.25) / Hf, f"{k + 1}  {name}：{t}", fontsize=9.5,
@@ -1129,12 +1130,8 @@ def elevation_drawing(raw, path, notes=ELEV_NOTES):
     img = plt.imread(raw)
     u0, u1, z0, z1 = meta["extent"]
     xa, xb, za, zb = -23.0, 29.0, -4.4, 14.4
-    wi = 16 * 0.94
-    hi = wi * (zb - za) / (xb - xa)
-    head, foot = 0.85, 0.15
-    Hf = head + hi + foot
-    fig = plt.figure(figsize=(16, Hf), dpi=200, facecolor=PAPER)
-    ax = fig.add_axes([0.03, foot / Hf, 0.94, hi / Hf])
+    fig = plt.figure(figsize=(16, 6), dpi=200, facecolor=PAPER)
+    ax = fig.add_axes([0.03, 0.03, 0.94, 0.8])
     ax.set_xlim(xa, xb); ax.set_ylim(za, zb); ax.set_aspect("equal"); ax.axis("off")
     ax.imshow(img, extent=(u0, u1, z0, z1), zorder=3, interpolation="antialiased")
     # 水体在立面前方：设计高潮位以下以半透明浅蓝覆盖，没入水中的台基仍隐约可见
@@ -1162,9 +1159,7 @@ def elevation_drawing(raw, path, notes=ELEV_NOTES):
     scale_bar(ax, xa + 0.6, -3.5, units=(0, 2, 5, 10), h=0.18, label_size=8, unit_gap=0.6)
     ax.text(xa + 0.3, zb - 0.6, "西  ←", fontsize=10, color=MUTED)
     ax.text(27.0, zb - 0.6, "→  东", fontsize=10, color=MUTED, ha="right")
-    fig.text(0.03, (Hf - 0.36) / Hf, "南立面", fontsize=18, color=INK, va="center")
-    fig.text(0.03, (Hf - 0.66) / Hf, "自湖面南侧看向门厅；栈桥在台基南缘外剖切（黑色）；浅蓝为设计高潮位以下的水体",
-             fontsize=11, color=MUTED, va="center")
+    tight_layout(fig, ax, "南立面", "自湖面南侧看向门厅；栈桥在台基南缘外剖切（黑色）；浅蓝为设计高潮位以下的水体")
     fig.savefig(path, facecolor=PAPER)
     plt.close(fig)
 
