@@ -98,7 +98,7 @@
 cloud-tide-pavilion/
 ├── model/
 │   ├── cloud_tide_pavilion.blend   完整场景（集合分组、材质、灯光、相机）
-│   └── cloud_tide_pavilion.glb     建筑主体 + 庭院（简化 PBR 材质，不含远景）
+│   └── cloud_tide_pavilion.glb     建筑、庭院、室内陈设、人物与湖岸配景（简化 PBR 材质；配景树叶抽稀，不含水面与远山）
 ├── renders/                        各机位渲染图、分析图（总平面、首层与平台平面、剖面、潮位、支承与抗侧力）、结构轴测图、四张展板 board_01–04.jpg
 └── src/
     ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥
@@ -114,7 +114,7 @@ cloud-tide-pavilion/
     ├── diagrams.py      区位图、总平面与日落轴线、首层与屋面平台平面（含疏散路线）、沿轴线长剖面、潮位曲线、支承距离与抗侧力图
     ├── struct_axo.py    结构轴测图（屋面半透明，承重构件着色）与标注锚点
     ├── boards.py        四张 A1 展板排版（概念、技术、平面与流线、结构）
-    └── export_glb.py    导出 GLB
+    └── export_glb.py    导出 GLB（网页版由 gltf-transform 以 meshopt 压缩，保留构件名，便于网页中按构件剖切）
 ```
 
 ### 场景分组（Outliner）
