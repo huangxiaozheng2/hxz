@@ -9,10 +9,11 @@
 ![展板五](renders/board_05.jpg)
 ![展板六](renders/board_06.jpg)
 ![展板七](renders/board_07.jpg)
+![湖上看展馆与滨湖城区](renders/lakeview.jpg)
 
 ## 设计说明
 
-**区位与到达。** 设定场地为北纬 30° 的一处湖泊。展馆离西南岸约 67 m，由湖岸公园的入口广场经约 80 m 的栈桥到达。湖岸公园有石砌驳岸、6 m 宽的滨水步道、入口广场与通往滨湖路的园路；步道内侧种垂柳，其后是成片的阔叶大树、灌木与松，种植只在岸线与滨湖路之间。岸线刻意避开冬至日落方向，夕阳仍落在开阔水面上。
+**区位与到达。** 设定场地为北纬 30° 的一处湖泊。展馆离西南岸约 67 m，由湖岸公园的入口广场经约 80 m 的栈桥到达。湖岸公园有石砌驳岸、6 m 宽的滨水步道、入口广场与通往滨湖路的园路；步道内侧种垂柳，其后是成片的阔叶大树、灌木与松，种植只在岸线与滨湖路之间。公园以南是滨湖城区：临路两三层的白墙灰瓦小楼与现代低层，其后是 5–8 层住宅与 8–16 层的后排建筑，近湖处压低高度；对岸约 1 km 外是城镇天际线与山顶的七层塔。岸线与城区都刻意避开冬至日落方向，夕阳仍落在开阔水面上。
 
 **潮汐庭院。** 三片月牙屋顶交错环抱一座阶梯式潮池。潮池经西南的水口与外部水面相通，一日两涨两落：设计高潮位 ±0.00 时池水漫至第三级台阶，低潮位 -0.95 时整池露底、留下潮痕。树岛立在池中，磨砂玻璃雕塑立在池底石台上，高潮时下半段没入水中。
 
@@ -104,12 +105,12 @@ cloud-tide-pavilion/
 │   └── cloud_tide_pavilion.glb     建筑、庭院、室内陈设、人物与湖岸配景（简化 PBR 材质；配景树叶抽稀，人物减面、发丝以发型体块代替，不含水面与远山）
 ├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、日照分析、爆炸轴测、潮位、支承与抗侧力）；结构轴测图；立面与爆炸轴测的线稿底图（*_raw.png）；日照计算结果 solar.json；种植位置 planting.json；七张展板 board_01–07.jpg
 └── src/
-    ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥
+    ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥、滨湖路与公园范围、滨湖城区布局（区位图与模型共用）
     ├── facade.py        幕墙分格、实墙段、框景窗与门的位置
     ├── structure.py     结构体系：柱网、承重墙、二层柱、支承距离检查、初步校核、风与抗侧力估算
     ├── program.py       功能与疏散：房间面积、出口、任一点到最近出口的步行与直线距离
     ├── architecture.py  屋顶与天窗、胶合木主次梁、幕墙与框景窗、基座与潮池、平台、坡道、电梯筒、疏散楼梯间、卫生间隔墙、柱 / 环梁 / 斜柱 / 石墩、螺旋楼梯、月洞墙
-    ├── scenery.py       树岛与雕塑、室内陈设与画作射灯、家具、人物布置、湖岸公园（驳岸、步道、广场、垂柳与阔叶树丛、灌木、地灯、坐凳；树按变体共享网格）、岛屿松树、远山
+    ├── scenery.py       树岛与雕塑、室内陈设与画作射灯、家具、人物布置、湖岸公园（驳岸、步道、广场、垂柳与阔叶树丛、灌木、地灯、坐凳；树按变体共享网格）、岛屿松树、远山、滨湖城区（立面窗格按 UV 生成，部分窗傍晚亮灯；江南小楼为双坡小青瓦）、行道树与路灯、对岸天际线与七层塔、湖上帆船与小木船
     ├── people.py        人物：头、躯干、四肢与手（含手指）的体块并集经体素重建，关节无接缝，脸有鼻、眉弓、唇与耳；衣物为外扩外壳加垂坠褶皱；头发为发丝曲线（毛发 BSDF），按短发、齐耳、披肩、马尾、发髻生长并受重力下垂
     ├── materials.py     材质库（统一以 M_ 开头）
     ├── scene.py         天空（物理天空 + 程序化薄云）、灯光、相机（每个机位带曝光和潮位）
@@ -134,9 +135,9 @@ CloudTidePavilion
 │   ├── Plinth_Terraces  Plinth_And_Bridge、Plinth_EdgeRailings（临水栏杆）、Courtyard_TidalBasin、Roof_Terrace_Deck、Terrace_MoonGate
 │   ├── Structure        Structure_LiftCore、Structure_EgressStair（EgressStair_Walls / Flights / FireDoors）、Structure_Supports（Supports_Columns / RingBeams_Steel / YStrut_Steel / StonePiers）
 │   └── Circulation      Courtyard_Ramp、Hall_SpiralStair
-├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures（People_*_i 网格、People_HairStrands_i 发丝曲线、People_HairProxy_Web 仅供网页）、Landscape（Water_Surface、Shore_*、Islets、Mountains_*）
+├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures（People_*_i 网格、People_HairStrands_i 发丝曲线、People_HairProxy_Web 仅供网页）、Landscape（Water_Surface、Shore_*、Town_*、FarShore_*、Boats_*、Islets、Mountains_*）
 ├── Lights
-└── Cameras              Cam_hero / approach / arrival / axis / axis_out / moon / court_ht / court_lt / aerial / interior / gallery / terrace / stair / structure / detail / dusk
+└── Cameras              Cam_hero / approach / arrival / axis / axis_out / moon / court_ht / court_lt / aerial / interior / gallery / terrace / stair / structure / detail / dusk / lakeview
 ```
 
 ## 重新生成
@@ -145,7 +146,7 @@ CloudTidePavilion
 python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib
 cd cloud-tide-pavilion
 PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend   # 同时导出种植位置给区位图
-../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders hero,approach,arrival,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
+../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders lakeview,hero,approach,arrival,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
 ../venv/bin/python src/struct_axo.py model/cloud_tide_pavilion.blend renders/struct_axo.png --samples=64
 ../venv/bin/python src/elevation.py model/cloud_tide_pavilion.blend renders/elevation_south_raw.png --side=south --samples=48   # Freestyle 线稿较慢，约 20 分钟
 ../venv/bin/python src/exploded.py model/cloud_tide_pavilion.blend renders/exploded_raw.png --samples=32

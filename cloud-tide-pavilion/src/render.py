@@ -11,6 +11,7 @@ RES = {
     "hero": (2400, 1000), "hero2": (2400, 1000), "aerial": (1600, 1000), "rear": (1600, 1000), "court": (1600, 1000),
     "interior": (1600, 1000), "terrace": (1600, 1000), "detail": (1600, 1000), "moon": (1600, 1000), "stair": (1600, 1000), "dusk": (2400, 1000), "entry": (1600, 1000),
     "axis": (1600, 1000), "axis_out": (1600, 1000), "court_ht": (1600, 1000), "court_lt": (1600, 1000), "structure": (1600, 1000),
+    "lakeview": (2400, 1000),
 }
 
 
@@ -30,6 +31,9 @@ def set_time(sc, dusk=False):
             l["base_energy"] = l.energy
         l.energy = l["base_energy"] * k
     for m in bpy.data.materials:
+        wl = m.node_tree.nodes.get("WindowLight") if m.node_tree else None
+        if wl:                                       # 城区窗灯：傍晚亮起更多
+            wl.outputs[0].default_value = 6.0 if dusk else 1.2
         if m.name.startswith("M_LED"):
             e = m.node_tree.nodes.get("Emission")
             if e:

@@ -451,6 +451,88 @@ def tidal_stone(name="M_Stone_Tidal", color=(0.70, 0.675, 0.63, 1), tide=0.0):
     return m
 
 
+def facade(name, wall, glass=(0.05, 0.06, 0.07, 1), bay=3.2, floor=3.4, win=1.4, sill=0.9, head=2.6, lit=0.18,
+           frame=None, glass_rough=0.12, haze=None):
+    """建筑立面：按 UV（u 沿立面、v 为高度，单位 m）生成窗格；一部分窗亮灯（节点 WindowLight 控制亮度，黄昏调高）。
+    haze=(near, far) 时随视距透出天色（对岸远景）。"""
+    m = _new(name); t = NT(m)
+    uv = t.n("ShaderNodeUVMap", (-1400, 0))
+    sep = t.n("ShaderNodeSeparateXYZ", (-1200, 0))
+    t.link(uv.outputs[0], sep.inputs[0])
+    u, v = sep.outputs[0], sep.outputs[1]
+    cu = t.math("FLOOR", t.math("DIVIDE", u, bay))
+    cv = t.math("FLOOR", t.math("DIVIDE", v, floor))
+    fu = t.math("FRACT", t.math("DIVIDE", u, bay))
+    fv = t.math("FRACT", t.math("DIVIDE", v, floor))
+    a = (1 - win / bay) / 2
+    inx = t.math("MULTIPLY", t.math("GREATER_THAN", fu, a), t.math("LESS_THAN", fu, 1 - a))
+    inz = t.math("MULTIPLY", t.math("GREATER_THAN", fv, sill / floor), t.math("LESS_THAN", fv, head / floor))
+    mask = t.math("MULTIPLY", inx, inz)
+    cmb = t.n("ShaderNodeCombineXYZ", (-600, -300))
+    t.link(cu, cmb.inputs[0]); t.link(cv, cmb.inputs[1])
+    cmb.inputs[2].default_value = (sum(map(ord, name)) % 997) / 7.0          # 确定性的种子（不用 hash()）
+    wn = t.n("ShaderNodeTexWhiteNoise", (-400, -300))
+    wn.noise_dimensions = "3D"
+    t.link(cmb.outputs[0], wn.inputs["Vector"])
+    litm = t.math("MULTIPLY", t.math("GREATER_THAN", wn.outputs["Value"], 1 - lit), mask)
+    # 墙面细微色差
+    tc = t.n("ShaderNodeTexCoord", (-1400, 400))
+    nz = t.n("ShaderNodeTexNoise", (-1200, 400), **{"Scale": 0.35, "Detail": 3.0})
+    t.link(tc.outputs["Object"], nz.inputs["Vector"])
+    wmix = t.n("ShaderNodeMix", (-800, 400)); wmix.data_type = "RGBA"
+    t.link(nz.outputs["Fac"], wmix.inputs["Factor"])
+    wmix.inputs["A"].default_value = tuple(c * 0.92 for c in wall[:3]) + (1,)
+    wmix.inputs["B"].default_value = tuple(min(1.0, c * 1.05) for c in wall[:3]) + (1,)
+    col = t.n("ShaderNodeMix", (-300, 200)); col.data_type = "RGBA"
+    t.link(mask, col.inputs["Factor"])
+    t.link(wmix.outputs["Result"], col.inputs["A"])
+    col.inputs["B"].default_value = glass
+    rough = t.n("ShaderNodeMapRange", (-300, 0), **{"To Min": 0.82, "To Max": glass_rough})
+    t.link(mask, rough.inputs["Value"])
+    b = t.bsdf(**{"Specular IOR Level": 0.5})
+    t.link(col.outputs["Result"], b.inputs["Base Color"])
+    t.link(rough.outputs[0], b.inputs["Roughness"])
+    wl = t.n("ShaderNodeValue", (-300, -400)); wl.name = "WindowLight"; wl.label = "WindowLight"
+    wl.outputs[0].default_value = 1.2
+    b.inputs["Emission Color"].default_value = (1.0, 0.72, 0.42, 1)
+    t.link(t.math("MULTIPLY", litm, wl.outputs[0]), b.inputs["Emission Strength"])
+    if haze is None:
+        t.link(b.outputs[0], t.out.inputs[0])
+    else:
+        cam = t.n("ShaderNodeCameraData", (-300, -700))
+        mr = t.n("ShaderNodeMapRange", (0, -700), **{"From Min": haze[0], "From Max": haze[1]})
+        t.link(cam.outputs["View Distance"], mr.inputs["Value"])
+        tr = t.n("ShaderNodeBsdfTransparent", (500, -300))
+        mx = t.n("ShaderNodeMixShader", (720, 0))
+        t.link(t.math("MULTIPLY", t.math("POWER", mr.outputs[0], 0.75), 0.9), mx.inputs[0])
+        t.link(b.outputs[0], mx.inputs[1]); t.link(tr.outputs[0], mx.inputs[2])
+        t.link(mx.outputs[0], t.out.inputs[0])
+    m.diffuse_color = wall
+    return m
+
+
+def roof_tile(name="M_Roof_Tile", color=(0.10, 0.105, 0.11, 1)):
+    """小青瓦：沿坡向的瓦垄（UV 的 u 为沿屋脊方向）+ 轻微凹凸。"""
+    m = _new(name); t = NT(m)
+    uv = t.n("ShaderNodeUVMap", (-900, 0))
+    wv = t.n("ShaderNodeTexWave", (-650, 0), **{"Scale": 1.0, "Distortion": 0.4, "Detail": 1.0})
+    wv.wave_type = "BANDS"; wv.bands_direction = "X"
+    mp = t.n("ShaderNodeMapping", (-800, 0))
+    mp.inputs["Scale"].default_value = (4.2, 1.0, 1.0)
+    t.link(uv.outputs[0], mp.inputs["Vector"]); t.link(mp.outputs[0], wv.inputs["Vector"])
+    ramp = t.n("ShaderNodeValToRGB", (-400, 0))
+    ramp.color_ramp.elements[0].color = tuple(c * 0.7 for c in color[:3]) + (1,)
+    ramp.color_ramp.elements[1].color = tuple(c * 1.35 for c in color[:3]) + (1,)
+    t.link(wv.outputs["Fac"], ramp.inputs["Fac"])
+    b = t.bsdf(**{"Roughness": 0.62, "Specular IOR Level": 0.45})
+    t.link(ramp.outputs[0], b.inputs["Base Color"])
+    bump = t.n("ShaderNodeBump", (250, -250), **{"Strength": 0.35, "Distance": 0.02})
+    t.link(wv.outputs["Fac"], bump.inputs["Height"]); t.link(bump.outputs[0], b.inputs["Normal"])
+    t.link(b.outputs[0], t.out.inputs[0])
+    m.diffuse_color = color
+    return m
+
+
 def build_library():
     L = {}
     L["roof"] = ivory_mineral("M_RoofSkin_Ivory", (0.86, 0.835, 0.79, 1), rough=0.48)
@@ -504,5 +586,31 @@ def build_library():
     L["skins"] = [skin(f"M_People_Skin_{k}", c) for k, c in enumerate((
         (0.74, 0.56, 0.45, 1), (0.62, 0.46, 0.36, 1), (0.52, 0.36, 0.26, 1), (0.36, 0.24, 0.17, 1)))]
     L["art"] = [painting(f"M_Art_{i}", seed=i * 3.7) for i in range(4)]
+    # 湖岸城区与对岸
+    L["town"] = {
+        "jiangnan": facade("M_Facade_Jiangnan", (0.86, 0.845, 0.81, 1), glass=(0.07, 0.055, 0.045, 1), bay=3.0, floor=3.4,
+                           win=1.3, sill=1.0, head=2.6, lit=0.22),
+        "modern": facade("M_Facade_Modern", (0.66, 0.62, 0.56, 1), bay=3.0, floor=4.0, win=2.6, sill=0.3, head=3.5,
+                         lit=0.25),
+        "modern_b": facade("M_Facade_Modern_Timber", (0.55, 0.40, 0.27, 1), bay=2.4, floor=4.0, win=1.9, sill=0.3,
+                           head=3.5, lit=0.25),
+        "residential": facade("M_Facade_Residential", (0.80, 0.765, 0.71, 1), bay=3.6, floor=3.0, win=1.8, sill=0.9,
+                              head=2.4, lit=0.2),
+        "residential_b": facade("M_Facade_Residential_Terracotta", (0.66, 0.50, 0.40, 1), bay=3.4, floor=3.0, win=1.6,
+                                sill=0.9, head=2.4, lit=0.2),
+        "residential_c": facade("M_Facade_Residential_Grey", (0.58, 0.59, 0.58, 1), bay=3.9, floor=3.0, win=2.2,
+                                sill=0.6, head=2.5, lit=0.2),
+        "tower": facade("M_Facade_Tower", (0.30, 0.33, 0.35, 1), glass=(0.08, 0.1, 0.12, 1), bay=1.5, floor=3.4,
+                        win=1.38, sill=0.8, head=3.2, lit=0.16, glass_rough=0.06),
+    }
+    L["town_far"] = facade("M_Facade_Far", (0.62, 0.6, 0.58, 1), bay=4.0, floor=3.2, win=2.4, sill=0.8, head=2.6,
+                           lit=0.12, haze=(150.0, 1400.0))
+    L["roof_tile"] = roof_tile()
+    L["asphalt"] = ivory_mineral("M_Asphalt", (0.10, 0.10, 0.105, 1), rough=0.88, scale=0.6)
+    L["far_land"] = distance_haze("M_FarShore_Land", (0.18, 0.21, 0.13, 1), near=250, far=1700)
+    L["pagoda"] = distance_haze("M_Pagoda", (0.55, 0.42, 0.30, 1), near=250, far=1800, rough=0.7)
+    L["boat_hull"] = flat("M_Boat_Hull", (0.82, 0.80, 0.76, 1), rough=0.35, spec=0.5)
+    L["boat_wood"] = wood_rib("M_Boat_Wood")
+    L["sail"] = flat("M_Sail", (0.92, 0.90, 0.85, 1), rough=0.75, spec=0.2)
     L["frame"] = flat("M_ArtFrame", (0.10, 0.09, 0.08, 1), rough=0.4)
     return L

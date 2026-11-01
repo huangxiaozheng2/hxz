@@ -191,14 +191,16 @@ def location_map(path):
         x, y = g.xy
         ax.plot(x, y, color="white", lw=6.5, solid_capstyle="butt", zorder=3)
         ax.plot(x, y, color="#b8b0a4", lw=0.6, zorder=3)
-    # 城区街坊（示意）
-    rng = np.random.default_rng(4)
-    city = land.difference(park.buffer(12.0)).difference(box(x0, y0, -150, -228))
-    for gx in np.arange(x0, x1, 30):
-        for gy in np.arange(y0, -60, 26):
-            blk = box(gx + 3, gy + 3, gx + 3 + rng.uniform(16, 24), gy + 3 + rng.uniform(13, 19))
-            if city.contains(blk):
-                fill_poly(ax, blk, fc="#d6cec1", ec="none", zorder=3)
+    # 城区（与模型同一份布局）：按层数由浅到深，江南白墙灰瓦的临路小楼单独着色
+    for b in P.TOWN:
+        if not frame.intersects(b["poly"]):
+            continue
+        if b["kind"] == "jiangnan":
+            fc = "#c9c3b8"
+        else:
+            k = min(1.0, b["floors"] / 16)
+            fc = tuple(np.array([0.86, 0.83, 0.78]) * (1 - 0.18 * k))
+        fill_poly(ax, b["poly"].intersection(frame), fc=fc, ec="#a8a094", lw=0.4, zorder=3)
     # 种植（build.py 导出的实际位置）：垂柳、阔叶树、松、灌木
     pj = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "renders", "planting.json")
     if os.path.exists(pj):

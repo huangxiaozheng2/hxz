@@ -440,6 +440,61 @@ def _road_park():
 ROAD_LINE, PARK = _road_park()
 
 
+# 湖岸城区（设定）：沿滨湖路内侧三排——临路 2–3 层（江南白墙灰瓦与现代低层）、5–7 层住宅、8–16 层后排；
+# 区位图与模型共用同一份布局。
+TOWN_GROUND_Z = SHORE_TOP + 1.6          # 与湖岸草坡最高处平接
+TOWN_STYLES = {  # 层高、开间、窗宽、窗台、窗顶（m）
+    "jiangnan": dict(floor=3.4), "modern": dict(floor=4.0), "residential": dict(floor=3.0), "tower": dict(floor=3.4)}
+
+
+def _town():
+    from shapely import affinity
+    rng = np.random.default_rng(12)
+    pts = np.asarray(ROAD_LINE.coords)
+    seg = np.diff(pts, axis=0)
+    sl = np.r_[0.0, np.cumsum(np.hypot(seg[:, 0], seg[:, 1]))]
+
+    def at(s_):
+        i = int(np.clip(np.searchsorted(sl, s_) - 1, 0, len(seg) - 1))
+        t_ = seg[i] / np.linalg.norm(seg[i])
+        p_ = pts[i] + t_ * (s_ - sl[i])
+        n_ = np.array([t_[1], -t_[0]])
+        if PARK.contains(Point(*(p_ + n_ * 12))) or SHORE.difference(PARK).distance(Point(*(p_ - n_ * 30))) == 0 \
+                and not PARK.contains(Point(*(p_ - n_ * 12))):
+            n_ = -n_
+        return p_, t_, n_
+    rows = [(17.0, (12.0, 18.0), (2, 4), ("jiangnan", "jiangnan", "modern")),
+            (49.0, (15.0, 22.0), (5, 8), ("residential",)),
+            (86.0, (16.0, 24.0), (8, 17), ("residential", "tower"))]
+    out, polys = [], []
+    for off, dep, fl, kinds in rows:
+        s_ = rng.uniform(3, 12)
+        while s_ < sl[-1] - 12:
+            w = rng.uniform(16, 32)
+            p_, t_, n_ = at(s_ + w / 2)
+            d = rng.uniform(*dep)
+            c = p_ + n_ * (off + d / 2)
+            if np.hypot(*c) < 520:
+                ang = math.degrees(math.atan2(t_[1], t_[0]))
+                poly = affinity.rotate(Polygon([(-w / 2, -d / 2), (w / 2, -d / 2), (w / 2, d / 2), (-w / 2, d / 2)]),
+                                       ang, origin=(0, 0)).buffer(0)
+                poly = affinity.translate(poly, c[0], c[1])
+                if not any(poly.buffer(4.0).intersects(q) for q in polys) and not poly.intersects(PARK):
+                    kind = str(rng.choice(kinds))
+                    out.append(dict(poly=poly, c=c, t=t_, n=n_, w=w, d=d, kind=kind,
+                                    floors=int(rng.integers(*fl)), seed=len(out)))
+                    polys.append(poly)
+            s_ += w + float(rng.choice([6.0, 8.0, 10.0, 24.0], p=[0.3, 0.3, 0.25, 0.15]))
+    return out
+
+
+TOWN = _town()
+# 对岸（设定）：东北—西北方向约 0.9–1.1 km 外的一条岸线与城镇天际线，山顶一座七层塔
+FAR_SHORE_ARC = (35.0, 165.0)           # 平面极角范围（度）
+FAR_SHORE_R = 900.0
+PAGODA_AT = (128.0, 960.0)              # (平面极角°, 距离 m)
+
+
 def _c_horn_water(min_clear=2.4):
     """低檐 C 东翼尖下方让出水面：凡净高不足 2.4 m 处不设平台，翼尖低伏于水上。"""
     minx, miny, maxx, maxy = ROOF_C.poly.bounds

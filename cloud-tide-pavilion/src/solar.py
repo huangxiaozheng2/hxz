@@ -18,7 +18,8 @@ import plan as P  # noqa: E402
 from plan import sun_vector, day_length  # noqa: E402
 
 DAYS = {"winter": -23.44, "equinox": 0.0, "summer": 23.44}
-SKIP = ("Glass", "People_", "Shore_", "Islet", "Mountains_", "Water", "LED", "Glow", "Lights_")
+SKIP = ("Glass", "People_", "Shore_", "Islet", "Mountains_", "Water", "LED", "Glow", "Lights_", "Boats_", "Sails")
+# 城区与对岸参与遮挡（低角度的冬季午后阳光可能被西南方的城区挡住）
 
 
 def main(blend, out_json, step=0.5, minutes=10):

@@ -573,9 +573,12 @@ def build_landscape(M, parent):
             build_pine(f"Islet{k}_Pine{t}", tcoll, M, (p[0], p[1], 0.35), seed=100 + k * 7 + t,
                        height=rng.uniform(3.8, 5.6), trunk_r=0.15, tiers=int(rng.integers(3, 5)), pad=0.95,
                        lean=tuple(rng.normal(0, 0.35, 2)))
-    build_shore(M, coll, tcoll, rock)
+    lib = build_shore(M, coll, tcoll, rock)
     rock.build("Islets_Rocks", coll, [M["rock"]], smooth=False)
     shrub.build("Islets_Shrubs", coll, [M["groundcover"]], smooth=False)
+    build_town(M, coll, tcoll, lib)
+    build_far_shore(M, coll)
+    build_boats(M, coll)
     build_mountains(M, coll)
     return coll
 
@@ -645,7 +648,7 @@ def build_shore(M, coll, tcoll, rock):
         t = np.clip((d - 10) / 60, 0, 1)
         return P.SHORE_TOP - sink + 1.6 * t * t * (3 - 2 * t)
     paved = shapely.unary_union([P.PROMENADE, P.LANDING, P.PARK_PATH.intersection(P.SHORE.buffer(-1.0))])
-    _fill(P.SHORE.difference(paved.buffer(0.05)), lambda V: ground(V, 0.04), "Shore_Lawn", coll, M["lawn"], 12.0)
+    _fill(P.PARK.difference(paved.buffer(0.05)), lambda V: ground(V, 0.04), "Shore_Lawn", coll, M["lawn"], 12.0)
     _fill(paved, ground, "Shore_Paving", coll, M["paving"], 3.0)
     # 驳岸：石砌立面（随潮位干湿）+ 压顶
     pts = np.asarray(edge.coords)
@@ -799,6 +802,237 @@ def build_shore(M, coll, tcoll, rock):
                          for p in placed[:2]]
         with open(os.environ["PLANTING_JSON"], "w") as f:
             json.dump(log, f)
+    return lib
+
+
+# =================================================================== 湖岸城区、对岸与船
+def _quad_uv(a, b, z0, z1, u0=0.0):
+    """竖直墙面四边形（a→b 水平，z0→z1），UV 以米计：u 沿墙，v 为高度。"""
+    L = float(np.linalg.norm(np.asarray(b[:2]) - np.asarray(a[:2])))
+    V = [(a[0], a[1], z0), (b[0], b[1], z0), (b[0], b[1], z1), (a[0], a[1], z1)]
+    UV = [(u0, 0.0), (u0 + L, 0.0), (u0 + L, z1 - z0), (u0, z1 - z0)]
+    return V, UV
+
+
+def build_town(M, coll, tcoll, lib):
+    """沿滨湖路的城区：路面与人行道、路灯、行道树、三排建筑（江南白墙灰瓦 / 现代低层 / 住宅 / 后排高层）。"""
+    z0 = P.TOWN_GROUND_Z
+    rng = np.random.default_rng(77)
+    # 城区地面：滨湖路以南（含 330 m 以外）
+    rc = np.asarray(P.ROAD_LINE.coords)
+    south = Polygon(np.vstack([rc, [(rc[-1][0] + 400, -900), (rc[0][0] - 400, -900)]])).buffer(0)
+    ground = south.union(P.SHORE.difference(P.PARK)).intersection(Point(0, 0).buffer(700, 64))
+    _fill(ground, lambda V: np.full(len(V), z0), "Town_Ground", coll, M["paving"], 40.0)
+    road = P.ROAD_LINE.buffer(6.0, cap_style="flat").intersection(Point(0, 0).buffer(700))
+    _fill(road, lambda V: np.full(len(V), z0 + 0.03), "Town_Road", coll, M["asphalt"], 20.0)
+    walk = P.ROAD_LINE.buffer(9.5, cap_style="flat").difference(P.ROAD_LINE.buffer(6.0, cap_style="flat"))
+    _fill(walk.intersection(Point(0, 0).buffer(700)), lambda V: np.full(len(V), z0 + 0.12), "Town_Sidewalk", coll,
+          M["stone_edge"], 10.0)
+    # 路灯与行道树
+    lamps = MeshBuf()
+    L_ = P.ROAD_LINE.length
+    for k, sd in enumerate(np.arange(6.0, L_, 12.0)):
+        q = np.array(P.ROAD_LINE.interpolate(sd).coords[0])
+        q2 = np.array(P.ROAD_LINE.interpolate(min(sd + 1.0, L_)).coords[0])
+        tt = (q2 - q) / (np.linalg.norm(q2 - q) + 1e-9)
+        nn = np.array([tt[1], -tt[0]])
+        if P.PARK.contains(Point(*(q + nn * 12))):
+            nn = -nn                                         # nn 指向城区一侧
+        if np.hypot(*q) > 600:
+            continue
+        if k % 2 == 0:
+            for side in (-1, 1):
+                c = q + nn * side * 7.8
+                v, f = lathe([(0, 0), (0.09, 0), (0.06, 0.3), (0.05, 6.2), (0.0, 6.2)], 12, (c[0], c[1], z0 + 0.12))
+                lamps.add(v, f)
+                v, f = box((c[0] - nn[0] * side * 0.5, c[1] - nn[1] * side * 0.5, z0 + 6.2), (1.1, 0.25, 0.12),
+                           math.atan2(nn[1], nn[0]))
+                lamps.add(v, f)
+        c = q + nn * 8.0
+        vi = k % 3
+        lib.place(("street", vi), lambda vi=vi: build_tree(f"Town_StreetTreeV{vi}", tcoll, M, (0.0, 0.0, 0.0),
+                                                           seed=860 + vi, height=7.5, trunk_r=0.22, depth=5,
+                                                           spread=1.3, leaf_size=0.2, leaves_per_twig=70, cluster=0.3,
+                                                           trunk_frac=0.36),
+                  f"Town_StreetTree{k}", (c[0], c[1], z0 + 0.12), rng.uniform(0, 2 * np.pi), rng.uniform(0.85, 1.1))
+    lamps.build("Town_StreetLamps", coll, [M["metal_dark"]], smooth=True)
+    # 建筑
+    walls = {k: MeshBuf() for k in M["town"]}
+    variant = {"residential": ("residential", "residential_b", "residential_c"), "modern": ("modern", "modern_b")}
+    roofs, flat_roofs, slabs = MeshBuf(), MeshBuf(), MeshBuf()
+    for b in P.TOWN:
+        kind = b["kind"]
+        fh = P.TOWN_STYLES[kind]["floor"]
+        H = b["floors"] * fh
+        corners = np.asarray(b["poly"].exterior.coords)[:4]
+        e1, e2 = corners[1] - corners[0], corners[2] - corners[1]
+        if e1[0] * e2[1] - e1[1] * e2[0] < 0:                 # 保证逆时针，墙面法线朝外
+            corners = corners[::-1]
+        mk = variant.get(kind, (kind,))[b["seed"] % len(variant.get(kind, (kind,)))]   # 同类建筑换几种立面色
+        u0 = 0.0
+        for i in range(4):
+            a, c = corners[i], corners[(i + 1) % 4]
+            V, UV = _quad_uv(a, c, z0, z0 + H, u0)
+            walls[mk].add(V, [[0, 1, 2, 3]], uv=UV)
+            u0 += float(np.linalg.norm(c - a)) + 1.3
+        t_, n_ = b["t"], b["n"]
+        cc = np.asarray(b["c"])
+        if kind == "jiangnan":                                # 双坡小青瓦屋面，出檐 0.6 m
+            e, pitch = 0.6, math.radians(27)
+            hw, hd = b["w"] / 2 + e, b["d"] / 2 + e
+            zr = z0 + H + (b["d"] / 2) * math.tan(pitch)
+            ze = z0 + H - e * math.tan(pitch)
+            for sg in (-1, 1):
+                p1 = cc - t_ * hw + n_ * sg * hd; p2 = cc + t_ * hw + n_ * sg * hd
+                p3 = cc + t_ * hw; p4 = cc - t_ * hw
+                V = [(p1[0], p1[1], ze), (p2[0], p2[1], ze), (p3[0], p3[1], zr), (p4[0], p4[1], zr)]
+                sl = math.hypot(hd, zr - ze)
+                roofs.add(V, [[0, 1, 2, 3]], uv=[(0, 0), (2 * hw, 0), (2 * hw, sl), (0, sl)])
+            for sg in (-1, 1):                                # 山墙三角
+                g1 = cc + t_ * sg * b["w"] / 2 - n_ * b["d"] / 2; g2 = cc + t_ * sg * b["w"] / 2 + n_ * b["d"] / 2
+                g3 = cc + t_ * sg * b["w"] / 2
+                walls[mk].add([(g1[0], g1[1], z0 + H), (g2[0], g2[1], z0 + H), (g3[0], g3[1], zr - 0.05)],
+                              [[0, 1, 2]], uv=[(0, 0), (b["d"], 0), (b["d"] / 2, 0.01)])
+            v, f, uv = tube(np.array([[*(cc - t_ * hw), zr + 0.08], [*(cc + t_ * hw), zr + 0.08]]), 0.16, 8)   # 屋脊
+            roofs.add(v, f, uv=uv)
+        else:                                                 # 平屋顶 + 女儿墙
+            ring = np.vstack([corners, corners[:1]])
+            flat_roofs.add([(x, y, z0 + H) for x, y in corners], [[0, 1, 2, 3]])
+            for i in range(4):
+                a, c = ring[i], ring[i + 1]
+                V, UV = _quad_uv(a, c, z0 + H, z0 + H + 0.7)
+                flat_roofs.add(V, [[0, 1, 2, 3]], uv=UV)
+            if b["floors"] >= 5:                              # 屋顶楼梯间 / 设备房
+                off_ = cc + t_ * b["w"] * 0.18 + n_ * b["d"] * 0.1
+                v, f = box((off_[0], off_[1], z0 + H + 1.6), (min(7.0, b["w"] * 0.3), min(5.0, b["d"] * 0.35), 3.2),
+                           math.atan2(t_[1], t_[0]))
+                flat_roofs.add(v, f)
+        if kind == "residential":                             # 朝湖一侧的阳台板
+            face = cc - n_ * (b["d"] / 2 + 0.6)
+            for fl in range(1, b["floors"]):
+                v, f = box((face[0], face[1], z0 + fl * fh - 0.1), (b["w"] * 0.86, 1.2, 0.16),
+                           math.atan2(t_[1], t_[0]))
+                slabs.add(v, f)
+    for k, buf in walls.items():
+        buf.build(f"Town_Buildings_{k}", coll, [M["town"][k]], smooth=False)
+    roofs.build("Town_Roofs_Tile", coll, [M["roof_tile"]], smooth=False)
+    flat_roofs.build("Town_Roofs_Flat", coll, [M["stone_edge"]], smooth=False)
+    slabs.build("Town_Balconies", coll, [M["wall"]], flat_shade=True)
+
+
+def build_far_shore(M, coll):
+    """对岸：一条带树林的岸线、天际线（随距离透出天色）与山顶七层塔。"""
+    rng = np.random.default_rng(55)
+    a0, a1 = P.FAR_SHORE_ARC
+    th = np.radians(np.linspace(a0, a1, 400))
+    R = P.FAR_SHORE_R + 60 * np.sin(3 * th) + 30 * np.cos(5 * th + 1.0)
+    inner = np.stack([R * np.cos(th), R * np.sin(th)], 1)
+    outer = np.stack([(R + 180) * np.cos(th), (R + 180) * np.sin(th)], 1)
+    land = Polygon(np.vstack([inner, outer[::-1]])).buffer(0)
+    _fill(land, lambda V: np.full(len(V), 0.9), "FarShore_Land", coll, M["far_land"], 400.0)
+    # 临水树林带：起伏的低矮林冠
+    verts = []
+    for j, (dr, hz) in enumerate(((4, 0.9), (10, 9.0), (26, 13.0), (40, 6.0))):
+        hh = hz * (0.7 + 0.3 * np.sin(th * 37 + j) ** 2) if j in (1, 2) else np.full(len(th), hz)
+        verts.append(np.stack([(R + dr) * np.cos(th), (R + dr) * np.sin(th), hh], 1))
+    V = np.vstack(verts); na = len(th)
+    F = [[j * na + i, j * na + i + 1, (j + 1) * na + i + 1, (j + 1) * na + i] for j in range(3) for i in range(na - 1)]
+    mesh_object("FarShore_TreeBand", V, F, coll, [M["far_land"]], smooth=True)
+    # 天际线
+    bufs = MeshBuf()
+    ang = a0 + 2.0
+    while ang < a1 - 2.0:
+        a = math.radians(ang)
+        r = P.FAR_SHORE_R + 60 * math.sin(3 * a) + 30 * math.cos(5 * a + 1.0) + rng.uniform(55, 160)
+        if abs(ang - P.PAGODA_AT[0]) < 7:
+            ang += 2.5
+            continue
+        w, d = rng.uniform(16, 40), rng.uniform(12, 26)
+        h = float(rng.choice([rng.uniform(9, 22), rng.uniform(22, 40), rng.uniform(40, 65)], p=[0.6, 0.32, 0.08]))
+        c = np.array([r * math.cos(a), r * math.sin(a)])
+        tdir = np.array([-math.sin(a), math.cos(a)]); ndir = np.array([math.cos(a), math.sin(a)])
+        cs = [c - tdir * w / 2 - ndir * d / 2, c + tdir * w / 2 - ndir * d / 2, c + tdir * w / 2 + ndir * d / 2,
+              c - tdir * w / 2 + ndir * d / 2]
+        u0 = 0.0
+        for i in range(4):
+            Vq, UV = _quad_uv(cs[i], cs[(i + 1) % 4], 0.9, 0.9 + h, u0)
+            bufs.add(Vq, [[0, 1, 2, 3]], uv=UV)
+            u0 += float(np.linalg.norm(cs[(i + 1) % 4] - cs[i]))
+        bufs.add([(x, y, 0.9 + h) for x, y in cs], [[0, 1, 2, 3]], uv=[(0, 0)] * 4)
+        ang += math.degrees((w + rng.uniform(8, 40)) / r)
+    bufs.build("FarShore_Skyline", coll, [M["town_far"]], smooth=False)
+    # 山与七层塔
+    pa, pr = math.radians(P.PAGODA_AT[0]), P.PAGODA_AT[1]
+    pc = np.array([pr * math.cos(pa), pr * math.sin(pa)])
+    # 山：不规则的丘陵（按方位起伏的半径与高度），塔立在主峰
+    na, nr = 72, 14
+    phi = np.linspace(0, 2 * np.pi, na, endpoint=False)
+    wob = 1 + 0.22 * np.sin(phi * 2 + 0.7) + 0.12 * np.sin(phi * 5 + 2.0) + 0.06 * rng.normal(size=na)
+    rings = []
+    for j in range(nr):
+        u = j / (nr - 1)
+        rr = 170 * (1 - u) * wob + 1e-3
+        zz = 48.5 * (1 - (1 - u) ** 2.2) * (0.92 + 0.08 * np.sin(phi * 3 + j))
+        rings.append(np.stack([pc[0] + rr * np.cos(phi), pc[1] + rr * np.sin(phi), zz], 1))
+    V = np.vstack(rings)
+    F = [[j * na + i, j * na + (i + 1) % na, (j + 1) * na + (i + 1) % na, (j + 1) * na + i]
+         for j in range(nr - 1) for i in range(na)]
+    mesh_object("FarShore_PagodaHill", V, F, coll, [M["far_land"]], smooth=True)
+    pg = MeshBuf()
+    z = 48.5
+    for tier in range(7):
+        r_ = 6.2 - 0.55 * tier
+        hgt = 4.6 - 0.2 * tier
+        v, f = lathe([(0, 0), (r_, 0), (r_, hgt), (0, hgt)], 8, (pc[0], pc[1], z))
+        pg.add(v, f)
+        v, f = lathe([(0, hgt - 0.3), (r_ + 2.1, hgt - 0.9), (r_ + 2.2, hgt - 0.6), (r_ * 0.7, hgt + 0.5), (0, hgt + 0.5)], 8,
+                     (pc[0], pc[1], z))
+        pg.add(v, f)
+        z += hgt
+    v, f = lathe([(0, 0), (1.0, 0), (0.25, 6.0), (0, 7.0)], 8, (pc[0], pc[1], z))
+    pg.add(v, f)
+    pg.build("FarShore_Pagoda", coll, [M["pagoda"]], smooth=False)
+
+
+def build_boats(M, coll):
+    """湖上的船：几艘帆船（远中景）与湖岸停泊的小木船。"""
+    hulls, woods, sails, masts = MeshBuf(), MeshBuf(), MeshBuf(), MeshBuf()
+
+    def hull(buf, c, heading, L, B, D):
+        xs = np.linspace(-L / 2, L / 2, 14)
+        rings = []
+        for x in xs:
+            s_ = max(0.05, 1 - (2 * x / L) ** 2) ** 0.5 * (1.0 if x < 0 else 1 - 0.35 * (2 * x / L) ** 2)
+            ring = []
+            for k in range(9):
+                phi = math.pi * k / 8
+                ring.append((x, -math.cos(phi) * B / 2 * s_, -math.sin(phi) * D * s_ ** 0.5 + 0.35))
+            rings.append(ring)
+        V = np.array([p for r_ in rings for p in r_])
+        F = [[i * 9 + j, (i + 1) * 9 + j, (i + 1) * 9 + j + 1, i * 9 + j + 1] for i in range(len(xs) - 1) for j in range(8)]
+        F += [[i * 9 + 0, i * 9 + 8, (i + 1) * 9 + 8, (i + 1) * 9 + 0] for i in range(len(xs) - 1)]   # 甲板
+        ca, sa = math.cos(heading), math.sin(heading)
+        Rz = np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]])
+        buf.add(V @ Rz.T + [c[0], c[1], 0.0], F)
+        return Rz
+    for k, (deg, r, heading) in enumerate(((96, 330, 30), (58, 470, -20), (142, 560, 75), (75, 760, 10))):
+        a = math.radians(deg)
+        c = (r * math.cos(a), r * math.sin(a))
+        Rz = hull(hulls, c, math.radians(heading), 6.5, 2.2, 0.8)
+        mast_h = 8.5
+        v, f = lathe([(0, 0), (0.07, 0), (0.05, mast_h), (0, mast_h)], 8, (c[0], c[1], 0.6))
+        masts.add(v, f)
+        main = np.array([[0.15, 0, 1.2], [2.7, 0, 1.3], [0.15, 0, mast_h - 0.3]])
+        jib = np.array([[-0.1, 0, 1.1], [-3.0, 0, 1.0], [-0.1, 0, mast_h - 1.2]])
+        for tri in (main, jib):
+            tri = tri.copy(); tri[:, 1] += np.array([0.0, 0.35, 0.1]) * (1 if k % 2 else -1)
+            sails.add(tri @ Rz.T + [c[0], c[1], 0.6], [[0, 1, 2]])
+    for k, (x, y, hd) in enumerate(((-47.0, -60.5, 35), (-44.5, -63.0, 42), (-80.5, -63.0, 160))):
+        hull(woods, (x, y), math.radians(hd), 4.2, 1.35, 0.5)
+    hulls.build("Boats_Hulls", coll, [M["boat_hull"]], smooth=True)
+    woods.build("Boats_Rowing", coll, [M["boat_wood"]], smooth=True)
+    masts.build("Boats_Masts", coll, [M["metal"]], smooth=True)
+    sails.build("Boats_Sails", coll, [M["sail"]], smooth=False)
 
 
 def build_mountains(M, coll):

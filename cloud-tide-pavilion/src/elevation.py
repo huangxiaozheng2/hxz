@@ -12,10 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-import plan as P  # noqa: E402
 
 HIDE = ("Mountains_", "Islet", "Shore_", "Exhibit_", "Lobby_", "Terrace_Sofa", "LED", "Lights_", "Courtyard_Tree",
-        "TreeIsland_GroundCover")
+        "TreeIsland_GroundCover", "Town_", "FarShore_", "Boats_")
 SIDES = {
     # 视线方向（相机看向的方向）、相机位置、正交宽度
     "south": (Vector((0, 1, 0)), Vector((0.0, -19.6, 5.5)), 62.0),
