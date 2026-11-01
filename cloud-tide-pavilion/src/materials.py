@@ -320,12 +320,73 @@ def painting(name, seed=0.0):
 
 
 def fabric(name, color, sheen=0.35, rough=0.88):
-    """织物：高粗糙度 + 柔和光泽边缘。"""
+    """织物：高粗糙度 + 柔和光泽边缘 + 细密织纹凹凸（约 1.5 mm）与轻微色差。"""
     m = flat(name, color, rough=rough, spec=0.3)
-    b = next(n for n in m.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled")
+    t = m.node_tree
+    b = next(n for n in t.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled")
     if "Sheen Weight" in b.inputs:
         b.inputs["Sheen Weight"].default_value = sheen
         b.inputs["Sheen Roughness"].default_value = 0.5
+    tc = t.nodes.new("ShaderNodeTexCoord")
+    weave = t.nodes.new("ShaderNodeTexWave")
+    weave.wave_type = "BANDS"; weave.bands_direction = "DIAGONAL"
+    weave.inputs["Scale"].default_value = 650.0
+    weave.inputs["Distortion"].default_value = 2.0
+    t.links.new(tc.outputs["Object"], weave.inputs["Vector"])
+    nz = t.nodes.new("ShaderNodeTexNoise")
+    nz.inputs["Scale"].default_value = 6.0
+    t.links.new(tc.outputs["Object"], nz.inputs["Vector"])
+    bump = t.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.12
+    bump.inputs["Distance"].default_value = 0.0006
+    t.links.new(weave.outputs["Fac"], bump.inputs["Height"])
+    t.links.new(bump.outputs["Normal"], b.inputs["Normal"])
+    mix = t.nodes.new("ShaderNodeMix"); mix.data_type = "RGBA"
+    mix.inputs["Factor"].default_value = 0.12
+    mix.inputs["A"].default_value = color
+    mix.inputs["B"].default_value = tuple(c * 0.8 for c in color[:3]) + (1,)
+    t.links.new(nz.outputs["Fac"], mix.inputs["Factor"])
+    t.links.new(mix.outputs["Result"], b.inputs["Base Color"])
+    return m
+
+
+def skin(name, color):
+    """皮肤：次表面散射（红色通道散得更远）+ 细微毛孔凹凸。"""
+    m = flat(name, color, rough=0.5, spec=0.45)
+    t = m.node_tree
+    b = next(n for n in t.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled")
+    b.inputs["Subsurface Weight"].default_value = 0.25
+    b.inputs["Subsurface Radius"].default_value = (1.0, 0.38, 0.22)
+    b.inputs["Subsurface Scale"].default_value = 0.012
+    tc = t.nodes.new("ShaderNodeTexCoord")
+    nz = t.nodes.new("ShaderNodeTexNoise")
+    nz.inputs["Scale"].default_value = 900.0
+    t.links.new(tc.outputs["Object"], nz.inputs["Vector"])
+    bump = t.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.05
+    bump.inputs["Distance"].default_value = 0.0002
+    t.links.new(nz.outputs["Fac"], bump.inputs["Height"])
+    t.links.new(bump.outputs["Normal"], b.inputs["Normal"])
+    return m
+
+
+def hair_strands(name, melanin=0.9, redness=0.25, color=None):
+    """发丝：Chiang 毛发模型；color 给定时直接着色（花白发）。"""
+    m = _new(name); t = NT(m)
+    hb = t.n("ShaderNodeBsdfHairPrincipled", (500, 0))
+    hb.model = "CHIANG"
+    if color is not None:
+        hb.parametrization = "COLOR"
+        hb.inputs["Color"].default_value = color
+    else:
+        hb.parametrization = "MELANIN"
+        hb.inputs["Melanin"].default_value = melanin
+        hb.inputs["Melanin Redness"].default_value = redness
+    for k, v in (("Roughness", 0.32), ("Radial Roughness", 0.38), ("Random Color", 0.08), ("Random Roughness", 0.2)):
+        if k in hb.inputs:
+            hb.inputs[k].default_value = v
+    t.link(hb.outputs[0], t.out.inputs[0])
+    m.diffuse_color = color or (0.02, 0.018, 0.015, 1)
     return m
 
 
@@ -410,6 +471,7 @@ def build_library():
     L["bronze"] = flat("M_Bronze", (0.38, 0.25, 0.15, 1), rough=0.32, metallic=1.0)
     L["leaf"] = leaf()
     L["leaf_pine"] = leaf("M_Leaf_Pine", (0.06, 0.12, 0.07, 1), (0.14, 0.21, 0.10, 1))
+    L["leaf_willow"] = leaf("M_Leaf_Willow", (0.20, 0.28, 0.09, 1), (0.40, 0.46, 0.17, 1))
     L["bark"] = bark()
     L["soil"] = flat("M_Planter_Soil", (0.10, 0.085, 0.07, 1), rough=0.95)
     L["groundcover"] = leaf("M_GroundCover", (0.12, 0.20, 0.08, 1), (0.25, 0.33, 0.13, 1))
@@ -435,7 +497,11 @@ def build_library():
         (0.03, 0.028, 0.026, 1), (0.82, 0.80, 0.77, 1), (0.17, 0.10, 0.055, 1)))]
     L["hairs"] = [flat(f"M_People_Hair_{k}", c, rough=0.5, spec=0.45) for k, c in enumerate((
         (0.018, 0.016, 0.014, 1), (0.06, 0.04, 0.028, 1), (0.15, 0.095, 0.055, 1), (0.42, 0.41, 0.39, 1)))]
-    L["skins"] = [flat(f"M_People_Skin_{k}", c, rough=0.58, spec=0.4) for k, c in enumerate((
+    L["hair_strands"] = [hair_strands("M_People_HairStrands_0", 0.95, 0.15),
+                         hair_strands("M_People_HairStrands_1", 0.85, 0.3),
+                         hair_strands("M_People_HairStrands_2", 0.66, 0.45),
+                         hair_strands("M_People_HairStrands_3", color=(0.36, 0.35, 0.34, 1))]
+    L["skins"] = [skin(f"M_People_Skin_{k}", c) for k, c in enumerate((
         (0.74, 0.56, 0.45, 1), (0.62, 0.46, 0.36, 1), (0.52, 0.36, 0.26, 1), (0.36, 0.24, 0.17, 1)))]
     L["art"] = [painting(f"M_Art_{i}", seed=i * 3.7) for i in range(4)]
     L["frame"] = flat("M_ArtFrame", (0.10, 0.09, 0.08, 1), rough=0.4)
