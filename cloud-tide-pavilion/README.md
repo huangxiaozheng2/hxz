@@ -169,7 +169,7 @@ PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb
 ../venv/bin/python src/export_ar.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion_ar   # → _ar.glb、_ar.usdz、_ar_open.usdz、_ar.json
-npx @gltf-transform/cli@4.1.1 optimize model/cloud_tide_pavilion_ar.glb web_ar.glb --compress meshopt --texture-compress false --simplify false --palette false --instance false   # AR 网页用，约 1.7 MB
+npx @gltf-transform/cli@4.1.1 optimize model/cloud_tide_pavilion_ar.glb web_ar.glb --compress meshopt --texture-compress false --palette false --instance false --simplify true --simplify-ratio 0 --simplify-error 0.0003 --simplify-lock-border true   # AR 网页用：再简化到约 17.8 万面、1.0 MB，手机上转动更顺；AR 文件本身不简化
 ```
 
 调整造型时修改 `src/plan.py`：三片屋顶的 `rin_keys` / `w_keys` / `h_keys` 控制点，`SOLSTICE_SUNSET_AZ`（换纬度即可重算轴线），`BASIN_STEPS` 与潮位，坡道参数。木梁、幕墙高度、柱高、栏杆、分析图都会随之更新；改完运行 `python src/structure.py` 看支承距离、初步校核与抗侧力是否仍在合理范围，运行 `python src/program.py` 看面积与疏散距离。
