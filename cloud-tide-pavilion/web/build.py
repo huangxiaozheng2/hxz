@@ -3,6 +3,7 @@
     ../venv/bin/python web/build.py            # 展示网站与 AR 网页都建（在 cloud-tide-pavilion/ 下运行）
     ../venv/bin/python web/build.py site       # 只建展示网站 → web/dist/site
     ../venv/bin/python web/build.py ar         # 只建 AR 网页 → web/dist/ar
+    ../venv/bin/python web/build.py film       # 导览影片的逐帧渲染页 → web/dist/film（再用 film/render.mjs 出帧）
 
 先在 web/ 里运行一次 npm install（gltf-transform 等工具，版本与网页引用的 CDN 版本一致）。
 
@@ -108,14 +109,53 @@ def build_site():
             shutil.copy(os.path.join(RENDERS, name), dst)
         else:
             sys.exit(f"页面引用了 img/{name}，但 renders/ 里没有，也不知道怎么生成")
+    size, tris = site_model_json(os.path.join(mdl, "pavilion.json"))
+    js = os.path.getsize(os.path.join(mdl, "pavilion.json"))
+    print(f"site → {os.path.relpath(out, ROOT)}：{len(names)} 张图，网页模型 {mb(size)} MB（下载 {mb(js)} MB）/ {tris / 1e4:.1f} 万面")
+
+
+def site_model_json(out):
+    """展示网站（与导览影片）用的网页模型：简化、压缩后写成 base64 JSON；返回 GLB 字节数与面数。"""
     with tempfile.TemporaryDirectory() as tmp:
         pre, glb = os.path.join(tmp, "pre.glb"), os.path.join(tmp, "web.glb")
         subprocess.run(["node", os.path.join(HERE, "site_model.mjs"), os.path.join(MODEL, "cloud_tide_pavilion.glb"), pre,
                         str(SITE_ERR_M)], check=True, stdout=subprocess.DEVNULL)
         optimize(pre, glb, SITE_GLTF)
-        size, tris = write_model_json(glb, os.path.join(mdl, "pavilion.json")), glb_triangles(glb)
-    js = os.path.getsize(os.path.join(mdl, "pavilion.json"))
-    print(f"site → {os.path.relpath(out, ROOT)}：{len(names)} 张图，网页模型 {mb(size)} MB（下载 {mb(js)} MB）/ {tris / 1e4:.1f} 万面")
+        return write_model_json(glb, out), glb_triangles(glb)
+
+
+def copy_fonts(dst):
+    """思源宋体 400/600、思源黑体 400/500（fontsource 的 woff2 分片，按 unicode-range 按需加载）。"""
+    fresh(os.path.join(dst, "files"))
+    for pkg, tag, weights in (("noto-serif-sc", "serif", (400, 600)), ("noto-sans-sc", "sans", (400, 500))):
+        src = os.path.join(HERE, "node_modules", "@fontsource", pkg)
+        if not os.path.isdir(src):
+            sys.exit(f"找不到 @fontsource/{pkg}：先在 web/ 里运行 npm install")
+        for w in weights:
+            css = open(os.path.join(src, f"{w}.css"), encoding="utf-8").read()
+            css = re.sub(r",\s*url\(\./files/[^)]+\.woff\) format\('woff'\)", "", css)     # 只留 woff2
+            for name in re.findall(r"url\(\./files/([^)]+\.woff2)\)", css):
+                shutil.copy(os.path.join(src, "files", name), os.path.join(dst, "files", name))
+            open(os.path.join(dst, f"{tag}-{w}.css"), "w", encoding="utf-8").write(css)
+
+
+def build_film():
+    out = fresh(os.path.join(DIST, "film"))
+    img, mdl = fresh(os.path.join(out, "img")), fresh(os.path.join(out, "model"))
+    html = open(os.path.join(HERE, "film", "index.html"), encoding="utf-8").read()
+    shutil.copy(os.path.join(HERE, "film", "index.html"), out)
+    shutil.copy(os.path.join(HERE, "film", "cams.json"), out)
+    shutil.copy(os.path.join(HERE, "site", "waternormals.jpg"), img)
+    names = sorted(set(re.findall(r"img: '(\w+)'", html)))
+    for n in names:
+        shutil.copy(os.path.join(RENDERS, n + ".jpg"), img)
+    site_json = os.path.join(DIST, "site", "model", "pavilion.json")       # 展示网站已建好且比模型新就直接用
+    if os.path.exists(site_json) and os.path.getmtime(site_json) > os.path.getmtime(os.path.join(MODEL, "cloud_tide_pavilion.glb")):
+        shutil.copy(site_json, mdl)
+    else:
+        site_model_json(os.path.join(mdl, "pavilion.json"))
+    copy_fonts(os.path.join(out, "fonts"))
+    print(f"film → {os.path.relpath(out, ROOT)}：{len(names)} 张渲染图（{'、'.join(names)}）")
 
 
 def ar_commit():
@@ -177,10 +217,12 @@ def build_ar(sha=None):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", nargs="?", choices=["site", "ar", "all"], default="all")
+    ap.add_argument("what", nargs="?", choices=["site", "ar", "film", "all"], default="all")
     ap.add_argument("--sha", help="AR 文件所在的提交（默认取最后一次修改 AR 文件的提交）")
     a = ap.parse_args()
     if a.what in ("site", "all"):
         build_site()
     if a.what in ("ar", "all"):
         build_ar(a.sha)
+    if a.what == "film":
+        build_film()

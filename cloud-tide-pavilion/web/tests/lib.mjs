@@ -13,7 +13,8 @@ try { pw = await import('playwright'); }
 catch { pw = await import('/opt/node22/lib/node_modules/playwright/index.mjs'); }   // 云端开发环境里预装的位置
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.json': 'application/json', '.js': 'text/javascript',
-                '.webp': 'image/webp', '.jpg': 'image/jpeg', '.png': 'image/png' };
+                '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff',      // 样式表必须标对类型，否则浏览器不采用
+                '.webp': 'image/webp', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml' };
 // 页面是片段：发布平台会补上文档骨架，这里同样补上
 const wrap = body => '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" ' +
   'content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>' + body + '</body></html>';

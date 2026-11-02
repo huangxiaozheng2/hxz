@@ -1,0 +1,384 @@
+<!-- 云上潮汐馆 · 导览影片的逐帧渲染页：web/film/render.mjs 逐帧调用 window.film.frame(t) 并截图。
+     场景（天空、灯光、水面倒影、模型与材质处理）与展示网站的 3D 模型相同；三维镜头经过渲染图机位时与那张渲染图同一视角，
+     两者叠化。镜头参数取自 Blender 场景里的相机（cams.json，由 web/film/export_cams.py 导出）。 -->
+<title>云上潮汐馆 · 导览影片</title>
+<link rel="stylesheet" href="fonts/serif-400.css">
+<link rel="stylesheet" href="fonts/serif-600.css">
+<link rel="stylesheet" href="fonts/sans-400.css">
+<link rel="stylesheet" href="fonts/sans-500.css">
+<style>
+:root { --u: calc(100vw / 1920); --serif: "Noto Serif SC", serif; --sans: "Noto Sans SC", sans-serif; }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+#stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.still { position: absolute; inset: 0; overflow: hidden; opacity: 0; }
+.still img { position: absolute; left: 50%; top: 50%; transform-origin: 50% 50%; }
+.shade { position: absolute; left: 0; right: 0; bottom: 0; height: 48%; opacity: 0;
+  background: linear-gradient(to top, rgba(10, 12, 14, .62), rgba(10, 12, 14, .26) 46%, rgba(10, 12, 14, 0)); }
+.cap { position: absolute; left: calc(112 * var(--u)); bottom: calc(96 * var(--u)); max-width: calc(1400 * var(--u)); color: #fff; opacity: 0; }
+.cap .kicker { font: 500 calc(21 * var(--u))/1.2 var(--sans); letter-spacing: .32em; color: #f1d7ae; margin: 0 0 calc(18 * var(--u)); }
+.cap h2 { font: 600 calc(50 * var(--u))/1.3 var(--serif); letter-spacing: .06em; margin: 0;
+  text-shadow: 0 calc(2 * var(--u)) calc(18 * var(--u)) rgba(0, 0, 0, .35); }
+.cap .sub { font: 400 calc(25 * var(--u))/1.6 var(--sans); letter-spacing: .06em; color: rgba(255, 255, 255, .88); margin: calc(14 * var(--u)) 0 0; }
+.title { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: #fff; opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(8, 10, 12, .46), rgba(8, 10, 12, .16) 55%, rgba(8, 10, 12, 0) 80%); }
+.title .en { font: 500 calc(22 * var(--u))/1 var(--sans); letter-spacing: .55em; margin: 0 0 calc(34 * var(--u)) .55em; color: rgba(255, 255, 255, .86); }
+.title h1 { font: 600 calc(128 * var(--u))/1.1 var(--serif); letter-spacing: .3em; margin: 0 0 0 .3em;
+  text-shadow: 0 calc(4 * var(--u)) calc(36 * var(--u)) rgba(0, 0, 0, .35); }
+.title .rule { width: calc(120 * var(--u)); height: max(1px, calc(1.5 * var(--u))); background: rgba(255, 255, 255, .72); margin: calc(36 * var(--u)) auto; }
+.title .zh { font: 400 calc(32 * var(--u))/1.4 var(--serif); letter-spacing: .3em; margin: 0 0 0 .3em; color: rgba(255, 255, 255, .93); }
+#black { position: absolute; inset: 0; background: #000; }
+</style>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <div class="still" id="stillA"><img alt=""></div>
+  <div class="still" id="stillB"><img alt=""></div>
+  <div class="shade" id="shade"></div>
+  <div class="cap" id="cap"><p class="kicker"></p><h2></h2><p class="sub"></p></div>
+  <div class="title" id="titleOpen"><p class="en">CLOUD TIDE PAVILION</p><h1>云上潮汐馆</h1><div class="rule"></div><p class="zh">湖上展馆 · 潮汐庭院 · 冬至日落轴线</p></div>
+  <div class="title" id="titleEnd"><p class="en">CLOUD TIDE PAVILION</p><h1>云上潮汐馆</h1><div class="rule"></div><p class="zh">北纬 30° · 潮差 0.95 m · 冬至日落 242.6°</p></div>
+  <div id="black"></div>
+</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Water } from 'three/addons/objects/Water.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const smooth = u => { u = clamp(u); return u * u * (3 - 2 * u); };
+const lerp = (a, b, u) => a + (b - a) * u;
+const CAMS = await (await fetch('cams.json')).json();
+
+// =====================================================================================
+// 时间轴（秒）。fly：三维镜头，keys 为途经的机位（cam = Blender 相机，或 p 位置 + t 注视点），move 为运动的起止时刻，
+// 其余时间停在起点或终点（覆盖与渲染图之间的叠化）。still：渲染图，带缓推 / 横移。字幕与片头片尾单独排。
+// =====================================================================================
+const cam = (name, d = 30) => { const c = CAMS[name]; return { p: c.pos, t: c.pos.map((v, i) => v + c.dir[i] * d), h: c.hfov }; };
+const FLY = [
+  { t0: 5.4, t1: 15.2, move: [5.4, 13.8], ramp: 0.4, keys: [                     // 湖面上空 → 栈桥头（从湖面一侧下降，避开湖岸公园的树冠与路灯）
+    { p: [-122, 36, 40], t: [-20, 0, 14], h: 60 },
+    { p: [-104, 22, 52], t: [-16, 1, 14] },
+    { p: [-89, 11, 63], t: [-12, 2, 12] },
+    { p: [-80, 5.6, 72.5], t: [-10, 4, 11] },
+    cam('Cam_arrival', 90)] },
+  { t0: 17.6, t1: 31.6, move: [17.6, 30.2], ramp: 0.22, keys: [                  // 沿栈桥滑向门厅，门前升起，俯瞰潮池
+    cam('Cam_arrival', 60),
+    { p: [-58, 3.3, 66], t: [-40, 3.2, 57] },
+    { p: [-46, 3.3, 60], t: [-28, 3.2, 50] },
+    { p: [-32, 3.3, 52], t: [-15, 3.4, 41] },
+    { p: [-20, 3.3, 44], t: [-5, 3.6, 33] },
+    { p: [-10, 3.3, 37], t: [0, 3.8, 24] },
+    { p: [-2.5, 3.4, 30.5], t: [0, 4.2, 14] },
+    { p: [0, 4.4, 23.5], t: [0, 5.5, 6], h: 58 },
+    { p: [0.6, 8.2, 19.0], t: [0.5, 3.0, 2] },
+    { p: [2.2, 13.0, 15.0], t: [0.2, 1.5, 1.5] },
+    cam('Cam_court_ht', 20)] },
+  { t0: 34.0, t1: 42.2, move: [34.0, 42.2], keys: [cam('Cam_court_ht', 20), cam('Cam_court_ht', 20)] },   // 原地：潮水退去
+  { t0: 44.6, t1: 56.6, move: [45.2, 55.2], ramp: 0.3, keys: [                   // 沿冬至日落轴线飞出水口，湖上回身
+    cam('Cam_axis', 30),
+    { p: [-3.0, 2.5, 1.55], t: [-30, 2.6, 15.6] },
+    { p: [-6.6, 3.2, 3.42], t: [-34, 3.0, 17.6] },          // 水口上的步行小桥（桥上有人）与上方梁之间的正中
+    { p: [-12, 3.0, 6.2], t: [-40, 2.6, 20.7] },
+    { p: [-24, 2.6, 12.45], t: [-50, 2.4, 26] },
+    { p: [-34, 2.6, 17.6], t: [-24, 3.0, 44] },
+    cam('Cam_axis_out', 45)] },
+  { t0: 59.0, t1: 70.6, move: [59.4, 69.2], ramp: 0.3, keys: [                   // 展廊东段：沿东段画墙走向楼梯间画墙
+    // 路线取自人眼高度的平面占用图：从外侧绕过雕塑底座与电梯筒，离障碍至少约 0.9 m；西段柱列、楼梯间与底座太挤，不进去
+    { p: arc(12.4, 35, 2.45), t: arc(14.0, 50, 2.2), h: 74 },
+    { p: arc(12.2, 46, 2.45), t: arc(14.0, 60, 2.2), h: 74 },
+    { p: arc(12.4, 55, 2.45), t: arc(14.2, 72, 2.2), h: 74 },
+    { p: arc(13.0, 62, 2.45), t: arc(14.4, 82, 2.2), h: 74 },
+    { p: arc(13.3, 69, 2.45), t: arc(13.8, 92, 2.2), h: 74 },
+    { p: arc(13.6, 76, 2.45), t: arc(13.2, 100, 2.15), h: 74 },
+    { p: arc(13.6, 81, 2.45), t: arc(12.9, 105, 2.1), h: 74 }] },
+  { t0: 73.0, t1: 87.0, move: [73.6, 85.6], ramp: 0.26, keys: [                  // 庭院里升起，落到坡道终点，从南门进观景厅
+    // 观景厅南面门洞两侧框在 x −1.4 与 +0.2（z ≈ −10.0），从正中进入；门内东侧是二层柱（−0.08, −10.8）与电梯筒，进门后偏西走
+    { p: [2.9, 2.0, 3.3], t: [2.2, 4.5, -8.0], h: 72 },
+    { p: [2.8, 5.5, 3.0], t: [1.4, 6.5, -8.0], h: 72 },
+    { p: [2.6, 11.0, 2.6], t: [0.5, 5.5, -7.0], h: 70 },
+    { p: [1.6, 10.0, -2.5], t: [0.0, 8.2, -9.5], h: 70 },
+    { p: [0.8, 7.9, -6.2], t: [-0.6, 8.0, -12.0], h: 70 },
+    { p: [-0.3, 7.9, -8.3], t: [-0.7, 7.9, -14.0], h: 70 },
+    { p: [-0.55, 7.9, -9.4], t: [-1.5, 7.9, -14.0], h: 70 },
+    { p: [-0.62, 7.9, -10.05], t: [-4.5, 8.0, -12.5], h: 70 },
+    { p: [-1.0, 7.9, -10.9], t: [-8.0, 8.2, -9.6], h: 70 },
+    cam('Cam_moon', 10)] },
+  { t0: 89.4, t1: 99.0, move: [89.4, 99.0], ramp: 0.35, keys: [                  // 鸟瞰拉远
+    { p: [3.0, 12.5, 3.5], t: [-2.0, 7.0, -5.0], h: 66 },
+    { p: [10.0, 20.0, 12.0], t: [-1.0, 4.0, -1.0], h: 64 },
+    cam('Cam_aerial', 60),
+    { p: [52, 64, 58], t: [0, 3, 2], h: 61.93 }] },
+];
+// 渲染图：kb = [起始缩放, 结束缩放, 起始横移, 结束横移]（横移以画面宽度计，正值往右）；fin / fout 为淡入淡出时长
+const STILL = [
+  { img: 'lakeview', t0: 0, t1: 6.6, fin: 0, fout: 1.2, kb: [1.0, 1.06, 0.14, -0.1] },
+  { img: 'arrival', t0: 14.0, t1: 18.8, kb: [1.0, 1.035, 0, 0], kbFrom: 15.2 },
+  { img: 'court_ht', t0: 30.4, t1: 35.2, kb: [1, 1, 0, 0] },
+  { img: 'court_lt', t0: 41.0, t1: 45.8, kb: [1.0, 1.03, 0, 0], kbFrom: 42.2 },
+  { img: 'axis_out', t0: 55.4, t1: 60.2, kb: [1.0, 1.035, 0, 0], kbFrom: 56.6 },
+  { img: 'gallery', t0: 69.4, t1: 74.2, kb: [1.0, 1.035, 0, 0], kbFrom: 70.6 },
+  { img: 'moon', t0: 85.8, t1: 90.6, kb: [1.0, 1.035, 0, 0], kbFrom: 87.0 },
+  { img: 'dusk', t0: 97.8, t1: 110.0, fout: 0, kb: [1.0, 1.05, -0.12, 0.1] },
+];
+const CAPS = [
+  { t0: 7.0, t1: 13.2, k: '01 · 到达', h: '从西南湖岸，一道 S 形栈桥伸向湖心', s: '栈桥长约 80 米，贴着水面通向南侧的玻璃门厅' },
+  { t0: 26.6, t1: 34.6, k: '02 · 庭院', h: '三片新月形屋顶，交错环抱一座阶梯式潮池', s: '潮池经西南的水口与湖水相通' },
+  { t0: 35.6, t1: 44.0, k: '03 · 潮汐', h: '一日两涨两落，潮差 0.95 米', s: '高潮时池水漫至第三级台阶，低潮时整池露底' },
+  { t0: 46.2, t1: 59.4, k: '04 · 冬至日落轴线', h: '水口、潮池与月洞墙，同指冬至日落方位 242.6°', s: '冬至傍晚，夕阳沿水口照进潮池' },
+  { t0: 60.4, t1: 73.6, k: '05 · 展廊', h: '象牙白实墙只开四处框景窗，天光从屋面光缝洗下', s: '三段展墙挂着六幅画：湖山、冬至落日、月洞、潮痕、夜湖、芦汀白鹭' },
+  { t0: 74.4, t1: 84.8, k: '06 · 坡道与屋面平台', h: '1:12 无障碍坡道绕潮池上升约两圈', s: '到达屋面平台，终点是次屋顶下的观景厅' },
+  { t0: 86.4, t1: 94.4, k: '07 · 月洞墙', h: '圆洞对准冬至日落方位', s: '冬至傍晚，夕阳穿过月洞，落进观景厅' },
+];
+const TITLES = [{ el: 'titleOpen', t0: 0.9, t1: 5.6, fin: 1.0, fout: 0.9 }, { el: 'titleEnd', t0: 100.4, t1: 110.0, fin: 1.4, fout: 0 }];
+const TIDE = [[0, 0], [35.4, 0], [40.4, -0.95], [42.4, -0.95], [42.45, 0], [999, 0]];   // 潮位（m）：只在第 3 段退潮
+const DURATION = 110.0, FADE_IN = 1.2, FADE_OUT = 1.4, XF = 1.2;
+
+// 展廊里的位置：设计坐标的极坐标（半径 m、极角 °，自东逆时针）→ 场景坐标（x 东、y 上、z 南）
+function arc(r, deg, y) { const a = deg * Math.PI / 180; return [r * Math.cos(a), y, -r * Math.sin(a)]; }
+
+// =====================================================================================
+// 场景：与展示网站相同
+// =====================================================================================
+const canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.85;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;                                     // 场景与太阳都不动：阴影只算一次
+renderer.shadowMap.needsUpdate = true;
+const W = innerWidth, H = innerHeight;
+renderer.setSize(W, H, false);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd9d4cf, 260, 900);
+{
+  const c = document.createElement('canvas'); c.width = 16; c.height = 256;
+  const g = c.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#6f97b6'); grad.addColorStop(0.3, '#a9bfcd'); grad.addColorStop(0.44, '#cfd2d0');
+  grad.addColorStop(0.5, '#d9d4cf'); grad.addColorStop(1, '#d9d4cf');
+  g.fillStyle = grad; g.fillRect(0, 0, 16, 256);
+  const sky = new THREE.CanvasTexture(c);
+  sky.mapping = THREE.EquirectangularReflectionMapping; sky.colorSpace = THREE.SRGBColorSpace;
+  scene.background = sky;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 2000);
+scene.add(new THREE.HemisphereLight(0xcfe0ee, 0x6a5a4a, 0.9));
+const sun = new THREE.DirectionalLight(0xffd2a1, 2.6);
+sun.position.set(-53, 9, 27.6);                                            // 冬至日落方位 242.6°
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 200 });
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+const waterNormals = await new THREE.TextureLoader().loadAsync('img/waternormals.jpg');
+waterNormals.wrapS = waterNormals.wrapT = THREE.RepeatWrapping;
+const water = new Water(new THREE.CircleGeometry(1200, 96), {
+  textureWidth: 1024, textureHeight: 1024, waterNormals,
+  sunDirection: sun.position.clone().normalize(), sunColor: 0xffd2a1, waterColor: 0x1b3443,
+  distortionScale: 0.9, fog: true, alpha: 1.0,
+});
+water.material.uniforms.size.value = 9.0;
+water.material.fragmentShader = water.material.fragmentShader.replace(
+  'vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) );',
+  'vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) ) * vec3( 0.5, 0.6, 0.68 );')
+  .replace('vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
+    'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );\n' +
+    'surfaceNormal = normalize( mix( surfaceNormal, vec3( 0.0, 1.0, 0.0 ), smoothstep( 60.0, 300.0, length( eye - worldPosition.xyz ) ) ) );');
+water.rotation.x = -Math.PI / 2;
+water.position.y = -0.02;
+scene.add(water);
+
+const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);
+const json = await (await fetch('model/pavilion.json')).json();
+const bin = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
+const gltf = await new Promise((ok, fail) => loader.parse(bin.buffer, '', ok, fail));
+const solid = [];
+gltf.scene.traverse(o => {
+  if (!o.isMesh) return;
+  const m = o.material;
+  if (m.transmission > 0 || m.opacity < 1) {                               // 玻璃：轻微反射、看得见室内
+    o.material = new THREE.MeshPhysicalMaterial({ color: 0xe8f2f2, metalness: 0, roughness: 0.04,
+      transparent: true, opacity: 0.16, envMapIntensity: 1.4, side: THREE.DoubleSide, depthWrite: false });
+    o.renderOrder = 2;
+  } else {
+    o.castShadow = true; o.receiveShadow = true;
+    if (m.emissiveIntensity !== undefined && m.emissive && m.emissive.getHex() !== 0) m.emissiveIntensity = 1.6;
+    solid.push(o);
+  }
+});
+scene.add(gltf.scene);
+scene.updateMatrixWorld(true);                                            // 射线检测要用到世界矩阵
+
+// =====================================================================================
+// 镜头路径：位置与注视点各走一条向心 Catmull-Rom 曲线，按路径长度匀速，起停两端用余弦缓入缓出
+// =====================================================================================
+const V = a => new THREE.Vector3(...a);
+function crPoint(P, i, u) {                                                // 第 i 段（P[i] → P[i+1]），u ∈ [0, 1]
+  const p1 = P[i], p2 = P[i + 1];
+  const p0 = i > 0 ? P[i - 1] : p1.clone().multiplyScalar(2).sub(p2);      // 首尾各外插一个控制点
+  const p3 = i + 2 < P.length ? P[i + 2] : p2.clone().multiplyScalar(2).sub(p1);
+  // 四点曲线的中间一段对应参数 [1/3, 2/3]
+  return new THREE.CatmullRomCurve3([p0, p1, p2, p3], false, 'centripetal').getPoint(lerp(1 / 3, 2 / 3, u));
+}
+function buildPath(seg) {
+  const P = seg.keys.map(k => V(k.p)), T = seg.keys.map(k => V(k.t));
+  const hf = seg.keys.map((k, i) => k.h ?? null);
+  for (let i = 0; i < hf.length; i++) if (hf[i] == null) {                // 没写视角的机位：取前后有值的机位插值
+    let a = i - 1, b = i + 1;
+    while (a >= 0 && hf[a] == null) a--;
+    while (b < hf.length && hf[b] == null) b++;
+    hf[i] = a < 0 ? (b < hf.length ? hf[b] : 60) : b >= hf.length ? hf[a] : lerp(hf[a], hf[b], (i - a) / (b - a));
+  }
+  const N = 64, table = [{ s: 0, i: 0, u: 0 }];                           // 弧长表
+  let s = 0, prev = P[0].clone();
+  for (let i = 0; i < P.length - 1; i++) for (let k = 1; k <= N; k++) {
+    const q = crPoint(P, i, k / N);
+    s += q.distanceTo(prev); prev = q;
+    table.push({ s, i, u: k / N });
+  }
+  return { P, T, hf, table, L: s };
+}
+function profile(u, a) {                                                   // 梯形速度、余弦过渡：0 → 1
+  u = clamp(u); a = clamp(a, 0.001, 0.5);
+  const ramp = x => x / 2 - a / (2 * Math.PI) * Math.sin(Math.PI * x / a);
+  let S;
+  if (u < a) S = ramp(u);
+  else if (u <= 1 - a) S = a / 2 + (u - a);
+  else S = a / 2 + (1 - 2 * a) + (a / 2 - ramp(1 - u));
+  return S / (1 - a);
+}
+function poseAt(seg, t) {
+  const path = seg.path || (seg.path = buildPath(seg));
+  const u = (t - seg.move[0]) / Math.max(1e-6, seg.move[1] - seg.move[0]);
+  const s = profile(u, seg.ramp ?? 0.3) * path.L;
+  const tb = path.table;
+  let lo = 0, hi = tb.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (tb[m].s < s) lo = m; else hi = m; }
+  const A = tb[lo], B = tb[hi], f = B.s > A.s ? (s - A.s) / (B.s - A.s) : 0;
+  let i = A.i, uu = lerp(A.u, B.i === A.i ? B.u : 1, f);
+  if (B.i !== A.i) { i = B.i; uu = lerp(0, B.u, f); }
+  if (path.L < 1e-6) { i = 0; uu = 0; }
+  const n = path.P.length - 1;
+  i = Math.min(i, Math.max(0, n - 1));
+  const pos = n ? crPoint(path.P, i, uu) : path.P[0].clone();
+  const tgt = n ? crPoint(path.T, i, uu) : path.T[0].clone();
+  const h = n ? lerp(path.hf[i], path.hf[i + 1], smooth(uu)) : path.hf[0];
+  return { pos, tgt, h };
+}
+
+// =====================================================================================
+// 逐帧
+// =====================================================================================
+const imgs = {};
+await Promise.all(STILL.map(async s => {
+  if (imgs[s.img]) return;
+  const im = new Image(); im.src = `img/${s.img}.jpg`;
+  await im.decode();
+  imgs[s.img] = im;
+}));
+await document.fonts.ready;
+await Promise.all(['600 50px "Noto Serif SC"', '400 32px "Noto Serif SC"', '400 25px "Noto Sans SC"', '500 21px "Noto Sans SC"']
+  .map(f => document.fonts.load(f, '云上潮汐馆冬至日落轴线展廊坡道月洞墙')));
+const layers = [$('stillA'), $('stillB')];
+STILL.forEach((s, i) => { s.layer = layers[i % 2]; });
+
+function fadeWin(t, t0, t1, fin, fout) {
+  if (t < t0 || t > t1) return 0;
+  const a = fin > 0 ? smooth((t - t0) / fin) : 1, b = fout > 0 ? smooth((t1 - t) / fout) : 1;
+  return Math.min(a, b);
+}
+function tideAt(t) {
+  for (let i = 0; i < TIDE.length - 1; i++) {
+    const [t0, z0] = TIDE[i], [t1, z1] = TIDE[i + 1];
+    if (t >= t0 && t <= t1) return lerp(z0, z1, smooth((t - t0) / (t1 - t0)));
+  }
+  return 0;
+}
+function placeStill(s, t) {
+  const el = s.layer, im = el.firstElementChild;
+  if (im.dataset.src !== s.img) { im.src = imgs[s.img].src; im.dataset.src = s.img; }
+  const ia = imgs[s.img].naturalWidth / imgs[s.img].naturalHeight, sa = W / H;
+  const w = ia > sa ? H * ia : W, h = ia > sa ? H : W / ia;               // 铺满画面（宽幅图左右溢出，16:10 图上下各裁 5%）
+  const k = smooth((t - (s.kbFrom ?? s.t0)) / (s.t1 - (s.kbFrom ?? s.t0)));
+  const sc = lerp(s.kb[0], s.kb[1], k), x = lerp(s.kb[2], s.kb[3], k) * W;
+  im.style.width = `${w}px`; im.style.height = `${h}px`;
+  im.style.transform = `translate(calc(-50% + ${x.toFixed(2)}px), -50%) scale(${sc.toFixed(5)})`;
+}
+function frame(t) {
+  // 渲染图
+  let covered = false;
+  for (const el of layers) el.style.opacity = 0;
+  for (const s of STILL) {
+    const o = fadeWin(t, s.t0, s.t1, s.fin ?? XF, s.fout ?? XF);
+    if (o <= 0) continue;
+    placeStill(s, t);
+    s.layer.style.opacity = o.toFixed(4);
+    if (o >= 0.999) covered = true;
+  }
+  // 三维
+  const seg = FLY.find(f => t >= f.t0 && t <= f.t1);
+  if (seg && !covered) {
+    const { pos, tgt, h } = poseAt(seg, clamp(t, seg.move[0], seg.move[1]));
+    camera.position.copy(pos);
+    camera.fov = 2 * Math.atan(Math.tan(h * Math.PI / 360) * H / W) * 180 / Math.PI;   // 水平视角 → 竖直视角
+    camera.aspect = W / H;
+    camera.updateProjectionMatrix();
+    camera.lookAt(tgt);
+    water.position.y = tideAt(t) - 0.02;
+    water.material.uniforms.time.value = t * 0.3;
+    renderer.render(scene, camera);
+  }
+  // 字幕
+  const c = CAPS.find(c => t >= c.t0 && t <= c.t1);
+  const co = c ? fadeWin(t, c.t0, c.t1, 0.7, 0.6) : 0;
+  if (c && $('cap').dataset.k !== c.k) {
+    $('cap').dataset.k = c.k;
+    $('cap').querySelector('.kicker').textContent = c.k;
+    $('cap').querySelector('h2').textContent = c.h;
+    $('cap').querySelector('.sub').textContent = c.s;
+  }
+  $('cap').style.opacity = co.toFixed(4);
+  $('cap').style.transform = `translateY(${((1 - co) * 14).toFixed(2)}px)`;
+  $('shade').style.opacity = (co * 0.95).toFixed(4);
+  // 片头片尾
+  for (const ti of TITLES) {
+    const o = fadeWin(t, ti.t0, ti.t1, ti.fin, ti.fout);
+    $(ti.el).style.opacity = o.toFixed(4);
+    $(ti.el).style.transform = `scale(${(1.0 + (1 - o) * 0.015).toFixed(4)})`;
+  }
+  $('black').style.opacity = Math.max(1 - smooth(t / FADE_IN), smooth((t - (DURATION - FADE_OUT)) / FADE_OUT)).toFixed(4);
+  return { fly: !!seg && !covered };
+}
+
+// 调试：某一时刻镜头四周（水平 16 个方向与上下）离最近实体的距离（m）
+const ray = new THREE.Raycaster();
+function clearance(t) {
+  const seg = FLY.find(f => t >= f.t0 && t <= f.t1);
+  if (!seg) return null;
+  const { pos } = poseAt(seg, clamp(t, seg.move[0], seg.move[1]));
+  let best = Infinity, dir = null;
+  const dirs = [[0, 1, 0], [0, -1, 0]];
+  for (let k = 0; k < 16; k++) dirs.push([Math.cos(k * Math.PI / 8), 0, Math.sin(k * Math.PI / 8)]);
+  for (const d of dirs) {
+    ray.set(pos, V(d)); ray.far = 3;
+    const h = ray.intersectObjects(solid, false)[0];
+    if (h && h.distance < best) { best = h.distance; dir = d; }
+  }
+  return { t, pos: pos.toArray().map(v => +v.toFixed(2)), min: best === Infinity ? null : +best.toFixed(2), dir };
+}
+window.film = { duration: DURATION, frame, clearance, pose: t => { const s = FLY.find(f => t >= f.t0 && t <= f.t1); return s ? poseAt(s, clamp(t, s.move[0], s.move[1])) : null; }, isReady: true };
+</script>

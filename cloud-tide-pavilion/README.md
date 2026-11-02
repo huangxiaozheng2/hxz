@@ -109,11 +109,12 @@ cloud-tide-pavilion/
 │   ├── cloud_tide_pavilion_ar.usdz         同上，iPhone / iPad 的 AR Quick Look 用
 │   ├── cloud_tide_pavilion_ar_open.usdz    揭开到首层的版本（去掉第 2–4 层：屋顶、屋面平台、观景厅与平台上的人）
 │   └── cloud_tide_pavilion_ar.json         AR 网页导航数据：五个层次的视角、15 处标注点与人视点（含三段画墙）、点击识别用的分区轮廓
-├── web/                            展示网站与 AR 网页（见「网页」一节）
+├── web/                            展示网站、AR 网页与导览影片（见「网页」「导览影片」两节）
 │   ├── build.py                    构建 → web/dist/site、web/dist/ar：复制与加工图片、压缩模型，AR 页填入导航数据、二维码、提交号与文件大小
 │   ├── site_model.mjs              展示网站模型预处理：去掉不用的 UV，逐个构件按 1 cm 误差简化（人物、金属柱与斜撑不动）
 │   ├── site/                       展示网站页面 index.html（页面片段，发布时补文档骨架）与水面法线贴图
 │   ├── ar/                         AR 网页模板 index.html 与封面图
+│   ├── film/                       导览影片：逐帧渲染页 index.html、机位 cams.json（export_cams.py 由 .blend 导出）、出帧 render.mjs、配乐 audio.py、合成 make_video.sh
 │   ├── tests/                      浏览器测试（Playwright）：点击、层次导航、点画、起飞平顺、版面、展示网站 3D 模型
 │   └── package.json                构建与测试工具，版本与网页引用的 CDN 版本一致
 ├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、日照分析、爆炸轴测、潮位、支承与抗侧力）；结构轴测图；立面与爆炸轴测的线稿底图（*_raw.png）；日照计算结果 solar.json；种植位置 planting.json；七张展板 board_01–07.jpg
@@ -172,10 +173,26 @@ AR 模型按 1:100 缩小：底座直径 56 cm、模型高约 14 cm，原点在�
 - AR 网页模型按 0.03% 网格尺寸的误差简化，约 2 MB、17.7 万面；页面上的文件大小与面数由构建时按实际文件填写。二维码与下载链接经 jsDelivr 指向最后一次修改 AR 文件的提交，AR 文件改动后先提交、推送，再构建发布。
 - `web/tests/` 的浏览器测试覆盖：点击（模型上、空白处、人视点里的天空、标注文字、玻璃、手机上带位移的轻点）、层次导航、点画、起飞平顺、两个页面在电脑与手机、浅色与深色下的版面、展示网站各预设视角。测试在本机起静态服务，把 CDN 脚本换成 `web/node_modules` 里的同版本文件。
 
+## 导览影片
+
+约 1 分 50 秒、1920 × 1080、30 帧，H.264 + AAC，可直接放进汇报 PPT 或手机播放；另出一份 720p 便于发送。沿到达路线走一遍：湖面上空降到栈桥头 → 贴着栈桥滑向门厅、门前升起俯瞰潮池 → 潮水从高潮退到低潮 → 沿冬至日落轴线飞出水口、湖上回身 → 展廊东段的画墙 → 庭院里升起、从坡道终点进观景厅、望向月洞墙 → 鸟瞰拉远，片尾落在黄昏全景上。每段配一行中文说明。
+
+- 三维镜头用的是展示网站同一个场景（网页模型、水面倒影、低角度夕照），在无界面浏览器里逐帧渲染、截图；经过渲染机位时与那张渲染图同一视角（机位取自 .blend 里的相机），两者叠化，从模型画面过渡到写实渲染。
+- 镜头路线避让：把模型在人眼高度的构件投影成平面占用图、沿轴线切竖向剖面，求出离障碍的距离，再沿净空大处走；页面里另有射线检测，逐段检查镜头四周 3 m 内最近的实体（目前各段都在 1 m 左右以上，进门处约 0.6 m）。展廊西段柱列、疏散楼梯间与雕塑底座之间太挤，镜头只走东段。
+- 配乐由 `audio.py` 合成（和弦铺底、每段一声轻钟、淡淡的湖水声），不含现成音乐；平均约 −20 dBFS，不抢解说。
+- 字体为思源宋体与思源黑体（fontsource 的 woff2），与展示网站一致。
+
+```bash
+../venv/bin/python web/film/export_cams.py model/cloud_tide_pavilion.blend   # 相机改动后重新导出机位
+../venv/bin/python web/build.py film                                        # → web/dist/film
+(cd web && node film/render.mjs dist/film_frames)                           # 逐帧渲染（约 1.2 GB，不进仓库），软件渲染下约 2.5 小时，可中断续渲
+web/film/make_video.sh web/dist/film_frames renders/walkthrough ../venv/bin/python   # → renders/walkthrough_1080p.mp4、walkthrough_720p.mp4
+```
+
 ## 重新生成
 
 ```bash
-python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib segno
+python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib segno   # 影片合成另需 ffmpeg
 cd cloud-tide-pavilion
 ../venv/bin/python src/paintings.py assets/paintings   # 展廊六幅画（build.py 找不到这些文件时也会自动生成）
 PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend   # 同时导出种植位置给区位图
@@ -188,7 +205,7 @@ PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb
 ../venv/bin/python src/export_ar.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion_ar   # → _ar.glb、_ar.usdz、_ar_open.usdz、_ar.json
-(cd web && npm install)   # 构建与测试工具：gltf-transform、model-viewer、three、meshoptimizer
+(cd web && npm install)   # 构建与测试工具：gltf-transform、model-viewer、three、meshoptimizer、思源字体
 ../venv/bin/python web/build.py   # 展示网站与 AR 网页 → web/dist/site、web/dist/ar；AR 网页模型另行简化到约 17.7 万面，AR 文件本身不简化
 (cd web && npm test)   # 浏览器测试，软件渲染下约 15–20 分钟
 ```
