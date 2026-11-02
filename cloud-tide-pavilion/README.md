@@ -105,8 +105,8 @@ cloud-tide-pavilion/
 │   ├── cloud_tide_pavilion.glb     建筑、庭院、室内陈设、人物与湖岸配景（简化 PBR 材质；配景树叶抽稀，人物减面、发丝以发型体块代替，不含水面与远山）
 │   ├── cloud_tide_pavilion_ar.glb  1:100 AR 桌面模型（安卓 Scene Viewer / WebXR / 网页 model-viewer），约 36.6 万三角面
 │   ├── cloud_tide_pavilion_ar.usdz         同上，iPhone / iPad 的 AR Quick Look 用
-│   ├── cloud_tide_pavilion_ar_open.usdz    掀开屋顶的版本（去掉屋顶、屋面平台、观景厅与平台上的人）
-│   └── cloud_tide_pavilion_ar.json         AR 网页标注点的模型坐标
+│   ├── cloud_tide_pavilion_ar_open.usdz    揭开到首层的版本（去掉第 2–4 层：屋顶、屋面平台、观景厅与平台上的人）
+│   └── cloud_tide_pavilion_ar.json         AR 网页导航数据：五个层次的视角、12 处标注点与人视点、点击识别用的分区轮廓
 ├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、日照分析、爆炸轴测、潮位、支承与抗侧力）；结构轴测图；立面与爆炸轴测的线稿底图（*_raw.png）；日照计算结果 solar.json；种植位置 planting.json；七张展板 board_01–07.jpg
 └── src/
     ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥、滨湖路与公园范围、滨湖城区布局（区位图与模型共用）
@@ -127,7 +127,7 @@ cloud-tide-pavilion/
     ├── solar.py         日照分析：北纬 30° 冬至、春秋分、夏至，在模型上逐点向太阳做光线追踪，得到首层与潮池的日照时数与逐时被晒面积
     ├── boards.py        七张 A1 展板排版（概念、技术、平面与流线、结构、生成与环境、立面与构造、分层日照与材料）
     ├── export_glb.py    导出 GLB（网页版由 gltf-transform 以 meshopt 压缩，保留构件名，便于网页中按构件剖切）
-    └── export_ar.py     导出 1:100 AR 模型：圆形水面底座 + 胡桃木边框（名牌、指北针），栈桥在底座边缘截断并补剖切面；细部减面；玻璃半透明（USDZ 补写 opacity）；上部构件用 Up_ 材质副本，另出一份掀开屋顶的 USDZ
+    └── export_ar.py     导出 1:100 AR 模型：圆形水面底座 + 胡桃木边框（名牌、指北针），栈桥在底座边缘截断并补剖切面；细部减面；玻璃半透明（USDZ 补写 opacity）；按爆炸轴测分五层（第 1–4 层材质名带 L1_–L4_ 前缀），另出一份揭开到首层的 USDZ；写出网页导航数据
 ```
 
 ### 场景分组（Outliner）
@@ -149,9 +149,10 @@ CloudTidePavilion
 
 AR 模型按 1:100 缩小：底座直径 56 cm、模型高约 14 cm，原点在底座底面中心，正面（glTF +Z）朝南、即栈桥一侧。
 
-- iPhone / iPad：在 Safari 或「文件」里打开 `model/cloud_tide_pavilion_ar.usdz`（掀开屋顶版为 `_open.usdz`），进入 AR Quick Look，对准桌面放置。
+- iPhone / iPad：在 Safari 或「文件」里打开 `model/cloud_tide_pavilion_ar.usdz`（揭开到首层的版本为 `_open.usdz`），进入 AR Quick Look，对准桌面放置。
 - 安卓：`model/cloud_tide_pavilion_ar.glb` 可用 Scene Viewer 或其他支持 AR 的 3D 查看应用打开；网页里由 model-viewer 走 WebXR。
-- 网页中的“掀开屋顶”：屋顶、屋面平台、观景厅等构件的材质名以 `Up_` 开头，把这些材质设为全透明裁切即可；iPhone AR 则切换到 `_open.usdz`。
+- 五个层次与爆炸轴测一致：基座·潮池·栈桥 / 首层 / 主屋顶·屋面平台 / 观景厅·月洞墙 / 次屋顶。第 1–4 层的材质名以 `L1_`…`L4_` 开头，网页据此逐层揭开、分层展开，并判断点到的是哪一层；再用 `_ar.json` 里的分区轮廓认出具体位置（门厅、展廊、潮池……）。iPhone AR 揭开到首层时切换到 `_open.usdz`。
+- 网页里点模型任意处，镜头飞到那一点；再点地面就以 1.6 m 人眼高度站在那里。12 处标注点各带一个视角，其中 8 处是人视点。
 
 ## 重新生成
 
