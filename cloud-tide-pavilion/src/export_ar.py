@@ -2,9 +2,11 @@
 供手机 AR 查看：iPhone 用 USDZ（AR Quick Look），安卓用 GLB（Scene Viewer / WebXR），网页用 model-viewer。
 只保留建筑、庭院、室内陈设与底座范围内的人物；去掉 LED 灯带、发丝曲线与湖岸配景。
 程序化材质换成同色的基础 PBR；玻璃改为半透明（AR 查看器不做折射）。
-屋顶、屋面平台、观景厅等上部构件改用名称以 "Up_" 开头的材质副本，网页把这些材质设为全透明即可“掀开屋顶”看首层。
+模型按爆炸轴测的五层分组：基座·潮池·栈桥 / 首层 / 主屋顶·屋面平台 / 观景厅·月洞墙 / 次屋顶。
+第 1–4 层构件改用名称以 "L1_"…"L4_" 开头的材质副本，网页据此逐层揭开、分层展开、识别点到的是哪一层。
 单位米（已按 1:100 缩小），原点在底座底面中心；glTF 的 +Z（模型正面）朝南，即栈桥一侧。
-用法：python export_ar.py scene.blend 输出前缀    → 前缀.glb、前缀.usdz、前缀.json（网页标注点的模型坐标）
+用法：python export_ar.py scene.blend 输出前缀
+      → 前缀.glb、前缀.usdz、前缀_open.usdz（去掉第 2–4 层）、前缀.json（网页导航：各层视角、标注点与人视点、分区轮廓）
 """
 import glob
 import json
@@ -31,23 +33,23 @@ R = 27.0                          # 水面半径（实际尺度，m）
 RIM_W, RIM_UP, BASE_T = 1.0, 0.25, 1.8     # 木边框宽、高出水面、水面以下的底座厚度（包住 -1.7 m 的池底与墩墙）
 KEEP = {"Architecture", "Courtyard", "Interior_Exhibits", "Terrace_Furniture", "People_ScaleFigures"}
 DROP = ("LED", "Glow", "HairStrands")
-UPPER = ("Roof_", "Deck_", "Envelope_E3_", "MoonGate_", "Terrace_Sofa_")
-SPLIT_LOOSE = ("Supports_Columns", "Supports_RingBeams_Steel")   # 按构件底标高分上下
-CORE_CUT = ("LiftCore_", "EgressStair_Walls", "EgressStair_FireDoors")   # 在屋面平台标高处切开
+LAYER_KEYS = ("base", "ground", "roofs", "upper", "roofB")
+LAYER_OF = (                      # 构件名前缀 → 层（同 exploded.py 的分层）；其余（基座、潮池、栈桥、树岛、陈设、地面上的人）在第 0 层
+    (("Roof_B_Upper",), 4),
+    (("Envelope_E3", "MoonGate_"), 3),
+    (("Roof_A_Main", "Roof_C_Low", "Deck_", "Terrace_Sofa_"), 2),
+    (("Envelope_E1", "Envelope_E2", "Service_", "Ramp_", "Stair_", "Supports_YStrut", "EgressStair_Flights"), 1),
+)
+SPLIT_LOOSE = ("Supports_Columns", "Supports_RingBeams_Steel")   # 按构件底标高分到首层或观景厅层
+CORE_CUT = ("LiftCore_", "EgressStair_Walls", "EgressStair_FireDoors")   # 在屋面平台标高处切开：下首层、上观景厅层
 PEOPLE_RATIO = 0.08
 DECIMATE = (("SoffitRibs", 0.25), ("PrimaryBeams", 0.4), ("Balustrade_Rail", 0.25), ("Mullions_Frames", 0.6),
             ("Ramp_Slab", 0.5), ("Columns", 0.5), ("EdgeTrim", 0.6), ("_Shell", 0.6), ("Sculpture_FrostedGlass", 0.4),
             ("TidalBasin_Steps", 0.6), ("Courtyard_Tree_Branches", 0.5))     # 1:100 下看不出的细部：按构件减面
 FONT = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
 NAMEPLATE = "云上潮汐馆 1:100"
-HOTSPOTS = {                      # 网页标注点（实际尺度的设计坐标 x, y, z）
-    "bridge": (0.3, -23.5, 1.0), "lobby": (1.0, -12.6, 2.6), "pool": (2.2, -1.2, 0.35),
-    "ramp": (P.RAMP_R * math.cos(math.radians(300)), P.RAMP_R * math.sin(math.radians(300)),
-             float(P.ramp_z_of_deg(300)) + 0.6),
-    "gallery": (5.0, 14.6, 2.8), "ystrut": (-11.6, -10.4, 3.2),
-    "deck": (8.6, 7.4, 7.0), "moon": (-9.0, 7.9, 8.2), "belvedere": (0.0, 11.0, 8.6),
-}
-UPPER_SPOTS = {"deck", "moon", "belvedere"}
+EXPLODE = (0.0, 6.5, 16.0, 23.5, 31.0)      # 分层展开时各层抬起的高度（实际尺度 m，同爆炸轴测）
+EYE = 1.6                                   # 人视点高度
 
 
 def lin(c):
@@ -202,43 +204,44 @@ def section_cap(objs, n):
     return me, sum(g.area for g in parts)
 
 
-def up_copy(m):
-    u = bpy.data.materials.get("Up_" + m.name)
+def layer_copy(m, k):
+    """第 k 层用的材质副本（L{k}_ 前缀）；第 0 层用原材质。"""
+    if k == 0 or m is None:
+        return m
+    name = f"L{k}_{m.name}"
+    u = bpy.data.materials.get(name)
     if u is None:
         u = m.copy()
-        u.name = "Up_" + m.name
+        u.name = name
     return u
 
 
-def assign_upper(o, face_mask):
-    """把选中的面换成 Up_ 材质副本（同一网格里追加材质槽）。"""
+def assign_layers(o, face_layer):
+    """按每个面的层号换材质（同一网格里追加各层的材质槽）。"""
     me = o.data
-    if not face_mask.any():
-        return 0
     mats = list(me.materials)
-    if not mats:
-        return 0
-    off = len(mats)
-    for m in mats:
-        me.materials.append(up_copy(m) if m else None)
+    if not mats or len(face_layer) == 0:
+        return
+    n = len(mats)
     mi = np.empty(len(me.polygons), np.int64)
     me.polygons.foreach_get("material_index", mi)
-    mi[face_mask] += off
+    for k in sorted(set(int(v) for v in face_layer) - {0}):
+        for m in mats:
+            me.materials.append(layer_copy(m, k))
+        mi[face_layer == k] += n * (len(me.materials) // n - 1)
     me.polygons.foreach_set("material_index", mi)
-    return int(face_mask.sum())
 
 
-def split_upper(o):
-    name = o.name
-    me = o.data
-    if name.startswith(UPPER):
-        for i, m in enumerate(me.materials):
-            if m:
-                me.materials[i] = up_copy(m)
-        return len(me.polygons)
+def layer_faces(o):
+    """每个面属于哪一层。"""
+    name, me = o.name, o.data
+    nf = len(me.polygons)
+    for prefixes, k in LAYER_OF:
+        if name.startswith(prefixes):
+            return np.full(nf, k)
     if name.startswith(SPLIT_LOOSE):
         lab, bb = components(me)
-        return assign_upper(o, (bb[:, 2] > P.DECK - 0.4)[lab])
+        return np.where(bb[:, 2] > P.DECK - 0.4, 3, 1)[lab]
     if name.startswith(CORE_CUT):
         bm = bmesh.new()
         bm.from_mesh(me)
@@ -246,17 +249,19 @@ def split_upper(o):
                                plane_no=(0, 0, 1))
         bm.to_mesh(me)
         bm.free()
-        return assign_upper(o, face_centers(me)[:, 2] > P.DECK + 0.02)
-    if name.startswith("People_"):
+        return np.where(face_centers(me)[:, 2] > P.DECK + 0.02, 3, 1)
+    if name.startswith("People_"):           # 平台上的人随平台（第 2 层），坡道上的人随坡道（第 1 层），其余站在基座上
         lab, bb = components(me)
         cx, cy = (bb[:, 0] + bb[:, 3]) / 2, (bb[:, 1] + bb[:, 4]) / 2
         on_ramp = np.abs(np.hypot(cx, cy) - P.RAMP_R) < P.RAMP_W / 2 + 0.4
-        return assign_upper(o, ((bb[:, 2] > P.DECK - 0.5) & ~on_ramp)[lab])
-    return 0
+        k = np.where(on_ramp & (bb[:, 2] > P.FFL + 0.15), 1, 0)
+        k = np.where((bb[:, 2] > P.DECK - 0.5) & ~on_ramp, 2, k)
+        return k[lab]
+    return np.zeros(nf, int)
 
 
 def simplify_materials():
-    """程序化材质 → 同色基础 PBR；玻璃半透明；不发光。Up_ 副本的粗糙度略作区分，避免压缩时被当作重复材质合并。
+    """程序化材质 → 同色基础 PBR；玻璃半透明；不发光。各层副本的粗糙度略作区分，避免压缩时被当作重复材质合并。
     返回 {材质名: 不透明度}，供 USD 补写（Blender 的 USD 导出不写 Alpha）。"""
     alphas = {}
     for m in bpy.data.materials:
@@ -280,7 +285,8 @@ def simplify_materials():
             new.inputs["Base Color"].default_value = (*lin((0.86, 0.92, 0.95) if frosted else (0.72, 0.82, 0.86)), 1)
             new.inputs["Alpha"].default_value = alphas[m.name] = 0.6 if frosted else 0.28
             rough, metal = (0.45 if frosted else 0.05), 0.0
-        new.inputs["Roughness"].default_value = min(1.0, rough + (0.004 if m.name.startswith("Up_") else 0.0))
+        k = int(m.name[1]) if len(m.name) > 3 and m.name[0] == "L" and m.name[1] in "1234" and m.name[2] == "_" else 0
+        new.inputs["Roughness"].default_value = min(1.0, rough + 0.002 * k)
         new.inputs["Metallic"].default_value = metal
         for link in list(out.inputs[0].links):
             nt.links.remove(link)
@@ -327,9 +333,9 @@ def export_usdz(path, alphas):
 
 
 def strip_upper(o):
-    """删掉 Up_ 材质的面（屋顶、屋面平台、观景厅等），得到“掀开屋顶”的版本。"""
+    """删掉第 2–4 层的面（屋顶、屋面平台、观景厅等），得到“掀开屋顶”的版本。"""
     me = o.data
-    up = np.array([bool(m and m.name.startswith("Up_")) for m in me.materials])
+    up = np.array([bool(m and m.name.startswith(("L2_", "L3_", "L4_"))) for m in me.materials])
     mi = np.empty(len(me.polygons), np.int64)
     me.polygons.foreach_get("material_index", mi)
     delete_faces(me, up[mi])
@@ -511,9 +517,13 @@ def main(blend, prefix):
     plinth = [o for o in keep if o.name.startswith(("Plinth_And_Bridge", "Plinth_Edge"))]
     sec_me, sec_area = section_cap([o for o in plinth if o.name.startswith("Plinth_And_Bridge")], n)
     print(f"section cap {sec_area:.2f} m2, {len(sec_me.polygons)} tris")
-    # 上部构件换 Up_ 材质
-    up_faces = sum(split_upper(o) for o in keep)
-    print("upper faces", up_faces)
+    # 分层：各层换 L{k}_ 材质副本
+    per_layer = np.zeros(5, int)
+    for o in keep:
+        fl = layer_faces(o)
+        assign_layers(o, fl)
+        per_layer += np.bincount(fl, minlength=5)[:5]
+    print("faces per layer", dict(zip(LAYER_KEYS, per_layer.tolist())))
     alphas = simplify_materials()
     # 底座：水面圆盘 + 胡桃木边框（内壁、顶面、外壁、底面）+ 剖切面 + 铭牌与指北针
     water = flat_material("AR_Water", (0.22, 0.41, 0.46), 0.06)
@@ -573,14 +583,98 @@ def main(blend, prefix):
     export_usdz(prefix + ".usdz", alphas)
     strip_upper(bpy.data.objects["CloudTidePavilion"])               # iPhone 上“掀开屋顶”用的另一份 USDZ
     export_usdz(prefix + "_open.usdz", alphas)
-    spots = {}
-    for k, (x, y, z) in HOTSPOTS.items():                 # glTF 坐标（Y 向上，+Z 朝南）
-        spots[k] = [round(x * SCALE, 4), round((z + BASE_T) * SCALE, 4), round(-y * SCALE, 4)]
-    info = dict(scale=SCALE, radius=round((R + RIM_W) * SCALE, 3), height_base=round((BASE_T + RIM_UP) * SCALE, 4),
-                hotspots=spots, upper_spots=sorted(UPPER_SPOTS), triangles=tris)
+    info = navigation()
+    info["triangles"] = tris
     with open(prefix + ".json", "w") as f:
-        json.dump(info, f, ensure_ascii=False, indent=1)
-    print("exported", prefix, info)
+        json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
+    print("exported", prefix, "spots", list(info["spots"]))
+
+
+def M(x, y, z):
+    """设计坐标（m）→ glTF 模型坐标（Y 向上，+Z 朝南，1:100，原点在底座底面）。"""
+    return [round(x * SCALE, 5), round((z + BASE_T) * SCALE, 5), round(-y * SCALE, 5)]
+
+
+def orbit(target, theta, phi, radius):
+    return dict(target=M(*target), theta=theta, phi=phi, radius=radius)
+
+
+def eye(xy, floor, look, pitch=-4.0, r=3.5, check=None):
+    """人视点：站在 xy、地面标高 floor，朝 look 方向看；model-viewer 的相机绕目标转，目标放在视线前方 r 处。"""
+    if check is not None:
+        assert check.contains(Point(*xy)), (xy, "not inside")
+    ex, ey, ez = xy[0], xy[1], floor + EYE
+    dx, dy = np.array(look, float) / np.hypot(*look)
+    pz = math.tan(math.radians(pitch))
+    d = np.array([dx, pz, -dy])
+    d /= np.linalg.norm(d)
+    u = -d                                                   # 目标 → 相机
+    return dict(target=M(ex + dx * r, ey + dy * r, ez + pz * r), theta=round(math.degrees(math.atan2(u[0], u[2])), 1),
+                phi=round(math.degrees(math.acos(u[1])), 1), radius=round(r * SCALE, 4), fov=58, eye=True)
+
+
+def poly_xy(g, tol=0.25):
+    g = g.simplify(tol)
+    parts = [g] if g.geom_type == "Polygon" else list(g.geoms)
+    return [[[round(x, 2), round(y, 2)] for x, y in p.exterior.coords[:-1]] for p in parts if p.area > 0.5]
+
+
+def navigation():
+    """网页导航数据：各层的总览视角、标注点（位置 + 视角，带人视点的可以“站进去看”）、点击识别用的分区轮廓。"""
+    lobby_x = 1.5
+    seg = P.E2.intersection(shapely.LineString([(lobby_x, -30), (lobby_x, 0)]))
+    lobby_y = seg.bounds[1] + 1.6
+    ramp_phi = -60.0
+    rp = (P.RAMP_R * math.cos(math.radians(ramp_phi)), P.RAMP_R * math.sin(math.radians(ramp_phi)))
+    mk = (P.RAMP_R * math.cos(math.radians(-20)), P.RAMP_R * math.sin(math.radians(-20)))
+    sky = (-9.6, 13.7)
+    sky_z = float(P.ROOF_A.surfaces(*sky)[0][0])
+    roof_b_z = float(P.ROOF_B.surfaces(0.5, 7.0)[0][0])
+    ax = P.AXIS
+    ch_eye = (ax[0] * 12.0, ax[1] * 12.0)
+    side = np.array([-ax[1], ax[0]])                      # 月洞墙人视点往旁边让 0.5 m，避开观景厅的竖框
+    moon_eye = tuple(np.array(P.MOON_C) - ax * 4.5 - side * 0.5)
+    ycol = P.YCOL_BASE
+    spots = {
+        "bridge": dict(layer=0, pos=M(0.3, -23.5, 1.0), view=eye((-0.6, -26.3), P.FFL, (0.08, 1), pitch=-3, check=P.BRIDGE)),
+        "pool": dict(layer=0, pos=M(1.6, -0.8, 0.3), view=orbit((0.0, 0.0, 0.6), -15, 48, 0.19)),
+        "channel": dict(layer=0, pos=M(ax[0] * 8.0, ax[1] * 8.0, 0.3),
+                        view=eye(ch_eye, P.FFL, (-ax[0], -ax[1]), pitch=-6)),
+        "lobby": dict(layer=1, pos=M(1.0, -12.6, 2.6), view=eye((lobby_x, lobby_y), P.FFL, (-0.1, 1), check=P.E2)),
+        "gallery": dict(layer=1, pos=M(5.0, 14.6, 2.8), view=eye((6.5, 14.6), P.FFL, (-1, -0.25), pitch=-3, check=P.E1)),
+        "ramp": dict(layer=1, pos=M(mk[0], mk[1], float(P.ramp_z_of_deg(-20)) + 0.6),
+                     view=eye(rp, float(P.ramp_z_of_deg(ramp_phi)),
+                              (-math.sin(math.radians(ramp_phi)), math.cos(math.radians(ramp_phi))), pitch=2)),
+        "ystrut": dict(layer=1, pos=M(ycol[0], ycol[1], 3.2),
+                       view=orbit((ycol[0], ycol[1], 4.2), round(math.degrees(math.atan2(ycol[0], -ycol[1])), 1), 74, 0.16)),
+        "deck": dict(layer=2, pos=M(8.6, 7.4, 7.0), view=eye((9.25, 11.25), P.DECK, (0.15, -1), check=P.DECK_POLY)),
+        "skylight": dict(layer=2, pos=M(sky[0], sky[1], sky_z + 0.3), view=orbit((sky[0], sky[1], sky_z), -30, 45, 0.2)),
+        "moon": dict(layer=3, pos=M(P.MOON_C[0], P.MOON_C[1], 8.2),
+                     view=eye(moon_eye, P.DECK, (ax[0], ax[1]), pitch=0, check=P.E3)),
+        "belvedere": dict(layer=3, pos=M(0.0, 11.0, 8.6), view=eye((-2.0, 11.0), P.DECK, (0.3, -1), check=P.E3)),
+        "roofB": dict(layer=4, pos=M(0.2, 6.0, roof_b_z + 0.3), view=orbit((0.5, 7.0, roof_b_z - 0.4), -25, 52, 0.42)),
+    }
+    layers = [orbit((0, -2, 0.9), 0, 46, 0.66), orbit((0, 0, 2.6), 0, 50, 0.62), orbit((0, 1, 6.5), 0, 50, 0.64),
+              orbit((-1, 10, 8.3), 0, 56, 0.36), orbit((0, 6, 10.5), 0, 46, 0.46)]
+    disc = Point(0, 0).buffer(R, 128)
+    wall_dir = np.array([-ax[1], ax[0]])
+    mc = np.array(P.MOON_C)
+    moon = shapely.Polygon([mc + wall_dir * s1 * P.MOON_HALF * 1.25 + ax * s2 * 0.7
+                            for s1, s2 in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
+    ystrut = shapely.MultiPoint([ycol] + [(r * math.cos(math.radians(a)), r * math.sin(math.radians(a)))
+                                          for r, a in P.YCOL_TOPS]).convex_hull.buffer(0.9)
+    zones = dict(
+        E1=poly_xy(P.E1), E2=poly_xy(P.E2), E3=poly_xy(P.E3), deck=poly_xy(P.DECK_POLY), basin=poly_xy(P.BASIN),
+        channel=poly_xy(P.CHANNEL.intersection(disc)), bridge=poly_xy(P.BRIDGE.intersection(disc).difference(P.PLINTH)),
+        service=poly_xy(P.SERVICE), egress=poly_xy(P.STAIR2), roofA=poly_xy(P.ROOF_A.poly), roofB=poly_xy(P.ROOF_B.poly),
+        roofC=poly_xy(P.ROOF_C.poly), skylight=poly_xy(shapely.unary_union(P.SKYLIGHTS).buffer(0.4), 0.15),
+        moon=poly_xy(moon, 0.05), ystrut=poly_xy(ystrut),
+    )
+    circles = dict(core=[*np.round(P.CORE_C, 2).tolist(), P.CORE_R + 0.3], stair=[*np.round(P.STAIR_C, 2).tolist(), 2.6],
+                   tree=[*np.round(P.TREE_POS, 2).tolist(), P.TREE_ISLAND_R + 0.2])
+    return dict(scale=SCALE, base_t=BASE_T, ffl=P.FFL, deck=P.DECK, ramp=[P.RAMP_R, P.RAMP_W],
+                explode=[round(v * SCALE, 4) for v in EXPLODE], layers=layers, spots=spots, zones=zones,
+                circles=circles, radius=round((R + RIM_W) * SCALE, 3))
 
 
 if __name__ == "__main__":
