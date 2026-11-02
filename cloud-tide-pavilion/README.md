@@ -92,6 +92,7 @@
 | 屋檐 | 楔形截面，边缘收薄到 0.15 m，半圆形拉丝金属包边；檐下 120 mm 阴影缝 |
 | 排水 | 距檐口 0.45–0.75 m 一圈余弦形浅槽，内衬深色金属格栅；槽内设虹吸雨水斗，水平管走屋面结构层，立管藏于钢柱（内径 174 mm，内置 DN100 管）与承重墙内，汇入基座内的蓄水池，回用于冲厕与潮池补水；翼尖低点设溢流口，直接排向水面 |
 | 展廊外墙 | 象牙白矿物质实墙，四处两跨宽的框景窗，外挑 0.62 m 的古铜色深窗框 |
+| 展廊画作 | 六幅原创画，挂在三段展墙朝庭院一侧（1.15 × 1.45 m，深色细框，每幅一盏窄光束射灯）：东段《冬至落日》《湖山清远》，中段（疏散楼梯间墙面）《潮痕》《月洞》，西段《芦汀白鹭》《夜湖灯影》。画由 `src/paintings.py` 程序绘制，题材取自展馆本身，不是已有作品的复制 |
 | 幕墙 | 等宽分段约 1.5 m，顶部金属收口带封至木梁底，室内侧暗藏洗木梁的灯带 |
 | 潮池石材 | 高潮位以下颜色加深、表面湿润，近池底泛淡青褐色，低潮时显出潮痕 |
 | 栏杆 | 屋面平台、栈桥与首层平台临水边、湖岸步道（栈桥两侧各约 150 m）：12+12 夹胶玻璃分段（板缝 12 mm）+ φ48 圆管扶手 + 底部压条，高 1.05 m；在水口、斜柱石墩与上岸处断开 |
@@ -100,13 +101,14 @@
 
 ```
 cloud-tide-pavilion/
+├── assets/paintings/               展廊六幅画（painting_0–5.jpg，1024 × 1291）与题名说明 paintings.json；贴图打包进 .blend、GLB 与 USDZ
 ├── model/
 │   ├── cloud_tide_pavilion.blend   完整场景（集合分组、材质、灯光、相机）
 │   ├── cloud_tide_pavilion.glb     建筑、庭院、室内陈设、人物与湖岸配景（简化 PBR 材质；配景树叶抽稀，人物减面、发丝以发型体块代替，不含水面与远山）
 │   ├── cloud_tide_pavilion_ar.glb  1:100 AR 桌面模型（安卓 Scene Viewer / WebXR / 网页 model-viewer），约 36.6 万三角面
 │   ├── cloud_tide_pavilion_ar.usdz         同上，iPhone / iPad 的 AR Quick Look 用
 │   ├── cloud_tide_pavilion_ar_open.usdz    揭开到首层的版本（去掉第 2–4 层：屋顶、屋面平台、观景厅与平台上的人）
-│   └── cloud_tide_pavilion_ar.json         AR 网页导航数据：五个层次的视角、12 处标注点与人视点、点击识别用的分区轮廓
+│   └── cloud_tide_pavilion_ar.json         AR 网页导航数据：五个层次的视角、15 处标注点与人视点（含三段画墙）、点击识别用的分区轮廓
 ├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、日照分析、爆炸轴测、潮位、支承与抗侧力）；结构轴测图；立面与爆炸轴测的线稿底图（*_raw.png）；日照计算结果 solar.json；种植位置 planting.json；七张展板 board_01–07.jpg
 └── src/
     ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥、滨湖路与公园范围、滨湖城区布局（区位图与模型共用）
@@ -116,7 +118,8 @@ cloud-tide-pavilion/
     ├── architecture.py  屋顶与天窗、胶合木主次梁、幕墙与框景窗、基座与潮池、平台、坡道、电梯筒、疏散楼梯间、卫生间隔墙、柱 / 环梁 / 斜柱 / 石墩、螺旋楼梯、月洞墙
     ├── scenery.py       树岛与雕塑、室内陈设与画作射灯、家具、人物布置、湖岸公园（驳岸、步道、广场、垂柳与阔叶树丛、灌木、地灯、坐凳；树按变体共享网格）、岛屿松树、远山、滨湖城区（立面窗格按 UV 生成，部分窗傍晚亮灯；江南小楼为双坡小青瓦）、行道树与路灯、对岸天际线与七层塔、湖上帆船与小木船
     ├── people.py        人物：头、躯干、四肢与手（含手指）的体块并集经体素重建，关节无接缝，脸有鼻、眉弓、唇与耳；衣物为外扩外壳加垂坠褶皱；头发为发丝曲线（毛发 BSDF），按短发、齐耳、披肩、马尾、发髻生长并受重力下垂
-    ├── materials.py     材质库（统一以 M_ 开头）
+    ├── materials.py     材质库（统一以 M_ 开头）；画作材质 M_Art_0–5 读取 assets/paintings 的贴图
+    ├── paintings.py     程序绘制展廊的六幅原创画：水墨（墨色浓度场 + 宣纸纹理）、油彩（按流向场逐笔铺色块）、矿物色、丙烯色带
     ├── scene.py         天空（物理天空 + 程序化薄云）、灯光、相机（每个机位带曝光和潮位）
     ├── build.py         总装 → .blend
     ├── render.py        渲染指定机位；按相机切换涨潮/落潮水位，dusk 机位切换为黄昏
@@ -140,7 +143,7 @@ CloudTidePavilion
 │   ├── Plinth_Terraces  Plinth_And_Bridge、Plinth_EdgeRailings（临水栏杆）、Courtyard_TidalBasin、Roof_Terrace_Deck、Terrace_MoonGate
 │   ├── Structure        Structure_LiftCore、Structure_EgressStair（EgressStair_Walls / Flights / FireDoors）、Structure_Supports（Supports_Columns / RingBeams_Steel / YStrut_Steel / StonePiers）
 │   └── Circulation      Courtyard_Ramp、Hall_SpiralStair
-├── Site                 Courtyard、Interior_Exhibits、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures（People_*_i 网格、People_HairStrands_i 发丝曲线、People_HairProxy_Web 仅供网页）、Landscape（Water_Surface、Shore_*、Town_*、FarShore_*、Boats_*、Islets、Mountains_*）
+├── Site                 Courtyard、Interior_Exhibits（Exhibit_Artwork_0–5 为六幅画）、Lights_GalleryAccent、Terrace_Furniture、People_ScaleFigures（People_*_i 网格、People_HairStrands_i 发丝曲线、People_HairProxy_Web 仅供网页）、Landscape（Water_Surface、Shore_*、Town_*、FarShore_*、Boats_*、Islets、Mountains_*）
 ├── Lights
 └── Cameras              Cam_hero / approach / arrival / axis / axis_out / moon / court_ht / court_lt / aerial / interior / gallery / terrace / stair / structure / detail / dusk / lakeview
 ```
@@ -152,13 +155,14 @@ AR 模型按 1:100 缩小：底座直径 56 cm、模型高约 14 cm，原点在�
 - iPhone / iPad：在 Safari 或「文件」里打开 `model/cloud_tide_pavilion_ar.usdz`（揭开到首层的版本为 `_open.usdz`），进入 AR Quick Look，对准桌面放置。
 - 安卓：`model/cloud_tide_pavilion_ar.glb` 可用 Scene Viewer 或其他支持 AR 的 3D 查看应用打开；网页里由 model-viewer 走 WebXR。
 - 五个层次与爆炸轴测一致：基座·潮池·栈桥 / 首层 / 主屋顶·屋面平台 / 观景厅·月洞墙 / 次屋顶。第 1–4 层的材质名以 `L1_`…`L4_` 开头，网页据此逐层揭开、分层展开，并判断点到的是哪一层；再用 `_ar.json` 里的分区轮廓认出具体位置（门厅、展廊、潮池……）。iPhone AR 揭开到首层时切换到 `_open.usdz`。
-- 网页里点模型任意处，镜头飞到那一点；再点地面就以 1.6 m 人眼高度站在那里。12 处标注点各带一个视角，其中 8 处是人视点。
+- 网页里点模型任意处，镜头飞到那一点；再点地面就以 1.6 m 人眼高度站在那里。15 处标注点各带一个视角，其中 11 处是人视点；三段画墙各有一个人视点，点到画或画框就走到那面墙前看。
 
 ## 重新生成
 
 ```bash
 python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib
 cd cloud-tide-pavilion
+../venv/bin/python src/paintings.py assets/paintings   # 展廊六幅画（build.py 找不到这些文件时也会自动生成）
 PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend   # 同时导出种植位置给区位图
 ../venv/bin/python src/render.py model/cloud_tide_pavilion.blend renders lakeview,hero,approach,arrival,axis,moon,court_ht,court_lt,aerial,axis_out,interior,gallery,terrace,stair,structure,detail,dusk --samples=128
 ../venv/bin/python src/struct_axo.py model/cloud_tide_pavilion.blend renders/struct_axo.png --samples=64
@@ -169,7 +173,7 @@ PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb
 ../venv/bin/python src/export_ar.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion_ar   # → _ar.glb、_ar.usdz、_ar_open.usdz、_ar.json
-npx @gltf-transform/cli@4.1.1 optimize model/cloud_tide_pavilion_ar.glb web_ar.glb --compress meshopt --texture-compress false --palette false --instance false --simplify true --simplify-ratio 0 --simplify-error 0.0003 --simplify-lock-border true   # AR 网页用：再简化到约 17.8 万面、1.0 MB，手机上转动更顺；AR 文件本身不简化
+npx @gltf-transform/cli@4.1.1 optimize model/cloud_tide_pavilion_ar.glb web_ar.glb --compress meshopt --texture-compress false --palette false --instance false --simplify true --simplify-ratio 0 --simplify-error 0.0003 --simplify-lock-border true   # AR 网页用：再简化到约 17.7 万面、2.0 MB（含六幅画的贴图），手机上转动更顺；AR 文件本身不简化
 ```
 
 调整造型时修改 `src/plan.py`：三片屋顶的 `rin_keys` / `w_keys` / `h_keys` 控制点，`SOLSTICE_SUNSET_AZ`（换纬度即可重算轴线），`BASIN_STEPS` 与潮位，坡道参数。木梁、幕墙高度、柱高、栏杆、分析图都会随之更新；改完运行 `python src/structure.py` 看支承距离、初步校核与抗侧力是否仍在合理范围，运行 `python src/program.py` 看面积与疏散距离。

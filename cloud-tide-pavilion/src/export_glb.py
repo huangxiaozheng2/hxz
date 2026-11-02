@@ -2,6 +2,7 @@
 程序化材质无法完整导出到 glTF，导出前替换为同色的基础 PBR 参数。
 配景树叶在网页里过重：只保留约一成叶片并放大，枝干减面，树冠轮廓与渲染图一致；同一变体的树共享网格，只处理一次。
 人物减面到约一成；发丝曲线无法写入 glTF，改用不参与渲染的发型体块（People_HairProxy_Web）。
+展廊画作保留图片贴图。
 用法：python export_glb.py scene.blend out.glb
 """
 import sys
@@ -87,8 +88,11 @@ def main(src, dst):
         pb = next((n for n in nt.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"), None)
         em = next((n for n in nt.nodes if n.bl_idname == "ShaderNodeEmission"), None)
         out = next(n for n in nt.nodes if n.bl_idname == "ShaderNodeOutputMaterial")
+        tex = next((n for n in nt.nodes if n.bl_idname == "ShaderNodeTexImage" and n.image), None)
         new = nt.nodes.new("ShaderNodeBsdfPrincipled")
         new.inputs["Base Color"].default_value = m.diffuse_color
+        if tex:                                           # 展廊画作：保留图片贴图
+            nt.links.new(tex.outputs["Color"], new.inputs["Base Color"])
         if pb:
             for k in ("Metallic", "Roughness", "Transmission Weight", "IOR"):
                 new.inputs[k].default_value = pb.inputs[k].default_value

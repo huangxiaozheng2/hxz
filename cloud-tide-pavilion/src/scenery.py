@@ -347,7 +347,7 @@ def build_interior(M, parent, e1_info, e2_info, e3_info):
 
     # 一层展廊中部弧形展墙与画作
     walls, frames = MeshBuf(), MeshBuf()
-    arts = [MeshBuf() for _ in range(4)]
+    arts = [MeshBuf() for _ in range(6)]                                      # 六幅画，各用一张图
     art_spots = []
     sc_, se_r, se_t = P.stair2_frame()
     stair_face = sc_ - se_r * (P.STAIR2_R_OUT - P.STAIR2_R_IN) / 2           # 楼梯间朝庭院的墙面即展墙
@@ -363,19 +363,19 @@ def build_interior(M, parent, e1_info, e2_info, e3_info):
         # 画作挂于朝庭院一侧
         for q in (0.3, 0.7):
             if a0 is None:
-                c = stair_face + se_t * (q - 0.5) * 4.0 + (-se_r) * 0.0
-                tdir, ndir = se_t, -se_r
+                c = stair_face + se_t * (q - 0.5) * 4.0
+                ndir = -se_r
             else:
                 am = math.radians(a0 + (a1 - a0) * q)
                 c = np.array([(r - 0.13) * math.cos(am), (r - 0.13) * math.sin(am)])
-                tdir = np.array([-math.sin(am), math.cos(am)])
                 ndir = -np.array([math.cos(am), math.sin(am)])
             w, h = 1.15, 1.45
             zc = P.FFL + 1.75
-            corners = [c - tdir * w / 2, c + tdir * w / 2]
+            right = np.array([-ndir[1], ndir[0]])         # 观者面对画面时的右手方向：画面不镜像，法线朝向观者
+            corners = [c - right * w / 2, c + right * w / 2]
             V = [[*(corners[0] + ndir * 0.035), zc - h / 2], [*(corners[1] + ndir * 0.035), zc - h / 2],
                  [*(corners[1] + ndir * 0.035), zc + h / 2], [*(corners[0] + ndir * 0.035), zc + h / 2]]
-            arts[(k * 2 + int(q > 0.5)) % 4].add(V, [[0, 1, 2, 3]], uv=[[0, 0], [1, 0], [1, 1], [0, 1]])
+            arts[k * 2 + int(q > 0.5)].add(V, [[0, 1, 2, 3]], uv=[[0, 0], [1, 0], [1, 1], [0, 1]])
             art_spots.append((np.r_[c + ndir * 0.04, zc], ndir))
             fr = np.array(V)
             for e in range(4):
@@ -398,7 +398,8 @@ def build_interior(M, parent, e1_info, e2_info, e3_info):
         aim(o, tuple(src), tuple(pc))
     frames.build("Exhibit_ArtFrames", coll, [M["frame"]], smooth=False)
     for i, a in enumerate(arts):
-        a.build(f"Exhibit_Artwork_{i}", coll, [M["art"][i]], smooth=False)
+        if a.n:                                                              # 某段展墙放不下时那两幅画为空
+            a.build(f"Exhibit_Artwork_{i}", coll, [M["art"][i]], smooth=False)
 
     # 门厅接待台（弧形）
     ang = np.radians(np.linspace(258, 282, 40))

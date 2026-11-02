@@ -1,6 +1,6 @@
 """AR 模型：1:100 桌面模型。圆形底座（水面 + 胡桃木边框，直径约 56 cm），栈桥在水面边缘截断并补上剖切面。
 供手机 AR 查看：iPhone 用 USDZ（AR Quick Look），安卓用 GLB（Scene Viewer / WebXR），网页用 model-viewer。
-只保留建筑、庭院、室内陈设与底座范围内的人物；去掉 LED 灯带、发丝曲线与湖岸配景。
+只保留建筑、庭院、室内陈设与底座范围内的人物；去掉 LED 灯带、发丝曲线与湖岸配景。展廊六幅画带图片贴图。
 程序化材质换成同色的基础 PBR；玻璃改为半透明（AR 查看器不做折射）。
 模型按爆炸轴测的五层分组：基座·潮池·栈桥 / 首层 / 主屋顶·屋面平台 / 观景厅·月洞墙 / 次屋顶。
 第 1–4 层构件改用名称以 "L1_"…"L4_" 开头的材质副本，网页据此逐层揭开、分层展开、识别点到的是哪一层。
@@ -272,8 +272,11 @@ def simplify_materials():
         out = next((x for x in nt.nodes if x.bl_idname == "ShaderNodeOutputMaterial"), None)
         if out is None:
             continue
+        tex = next((x for x in nt.nodes if x.bl_idname == "ShaderNodeTexImage" and x.image), None)
         new = nt.nodes.new("ShaderNodeBsdfPrincipled")
         new.inputs["Base Color"].default_value = m.diffuse_color
+        if tex:                                          # 展廊画作：保留图片贴图
+            nt.links.new(tex.outputs["Color"], new.inputs["Base Color"])
         rough, metal, trans = 0.5, 0.0, 0.0
         if pb:
             rough = pb.inputs["Roughness"].default_value
@@ -308,7 +311,7 @@ def export_usdz(path, alphas):
     """先导出 .usdc，补写玻璃的 opacity，再按 ARKit 规则打包成 .usdz。"""
     tmp = path[:-5] + ".usdc"
     bpy.ops.wm.usd_export(filepath=tmp, selected_objects_only=True, export_materials=True,
-                          generate_preview_surface=True, export_uvmaps=False, export_mesh_colors=False,
+                          generate_preview_surface=True, export_uvmaps=True, export_mesh_colors=False,
                           export_normals=True, use_instancing=False, convert_orientation=True,
                           export_global_forward_selection="NEGATIVE_Z", export_global_up_selection="Y",
                           convert_world_material=False, root_prim_path="/CloudTidePavilion")
@@ -329,6 +332,8 @@ def export_usdz(path, alphas):
         os.remove(path)
     ok = UsdUtils.CreateNewARKitUsdzPackage(tmp, path)
     os.remove(tmp)
+    import shutil                                         # USD 导出时写在旁边的贴图已打进 .usdz，删掉
+    shutil.rmtree(os.path.join(os.path.dirname(tmp), "textures"), ignore_errors=True)
     print("usdz", path, "opacity patched", patched, "ok", ok)
 
 
@@ -564,8 +569,15 @@ def main(blend, prefix):
     print(f"objects {len(allobj)}, triangles {tris}")
     for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:30]:
         print(f"  {v:7d}  {k}")
-    # 合成两个网格：建筑与人物（含上部构件）、底座
-    for group, name in ((keep, "CloudTidePavilion"), (base, "ModelBase")):
+    # 画作单独保留（带 UV 与贴图），其余网格去掉 UV，文件不白白变大
+    arts = [o for o in keep if o.name.startswith("Exhibit_Artwork")]
+    for o in keep + base:
+        if o in arts:
+            continue
+        while o.data.uv_layers:
+            o.data.uv_layers.remove(o.data.uv_layers[0])
+    # 合成两个网格：建筑与人物（含上部构件）、底座；画作各自独立
+    for group, name in (([o for o in keep if o not in arts], "CloudTidePavilion"), (base, "ModelBase")):
         bpy.ops.object.select_all(action="DESELECT")
         for o in group:
             o.select_set(True)
@@ -577,7 +589,7 @@ def main(blend, prefix):
     for o in bpy.data.objects:
         o.select_set(o.type == "MESH")
     bpy.ops.export_scene.gltf(filepath=prefix + ".glb", export_format="GLB", use_selection=True,
-                              export_apply=True, export_texcoords=False, export_normals=True,
+                              export_apply=True, export_texcoords=True, export_normals=True,
                               export_tangents=False, export_vertex_color="NONE", export_attributes=False,
                               export_cameras=False, export_lights=False, export_yup=True)
     export_usdz(prefix + ".usdz", alphas)
@@ -635,6 +647,28 @@ def navigation():
     side = np.array([-ax[1], ax[0]])                      # 月洞墙人视点往旁边让 0.5 m，避开观景厅的竖框
     moon_eye = tuple(np.array(P.MOON_C) - ax * 4.5 - side * 0.5)
     ycol = P.YCOL_BASE
+    art_walls = []                                        # 三段展墙（与 scenery.py 的画作位置一致）：站在墙前同时看两幅画
+    for a0, a1, r in ((40, 64, 14.2), (126, 144, 14.0)):
+        ang = np.radians(np.linspace(a0, a1, 40))
+        pts = np.stack([r * np.cos(ang), r * np.sin(ang)], 1)
+        if not all(P.E1.buffer(-0.6).contains(Point(*q)) for q in pts[::6]):
+            art_walls.append(None)
+            continue
+        am = math.radians((a0 + a1) / 2)
+        out_dir = np.array([math.cos(am), math.sin(am)])
+        art_walls.append((out_dir * (r - 0.1), out_dir))
+    sc_, se_r, se_t = P.stair2_frame()
+    stair_face = sc_ - se_r * (P.STAIR2_R_OUT - P.STAIR2_R_IN) / 2
+    art_walls.insert(1, (stair_face, se_r))
+    art = {}
+    for key, wall in zip(("artE", "artS", "artW"), art_walls):
+        if wall is None:
+            continue
+        c, facing = wall                                  # facing：从观者指向墙
+        # 尽量退远（手机竖屏视野窄，两幅画要一起看全），但离走廊边界至少留 0.35 m；楼梯间墙前的走廊较窄，会站得近些
+        d = next(d for d in np.arange(4.0, 2.15, -0.1) if P.E1.buffer(-0.35).contains(Point(*(c - facing * d))))
+        art[key] = dict(layer=1, pos=M(c[0] - facing[0] * 0.3, c[1] - facing[1] * 0.3, P.FFL + 2.75),
+                        view=eye(tuple(c - facing * d), P.FFL, tuple(facing), pitch=1.5, check=P.E1))
     spots = {
         "bridge": dict(layer=0, pos=M(0.3, -23.5, 1.0), view=eye((-0.6, -26.3), P.FFL, (0.08, 1), pitch=-3, check=P.BRIDGE)),
         "pool": dict(layer=0, pos=M(1.6, -0.8, 0.3), view=orbit((0.0, 0.0, 0.6), -15, 48, 0.19)),
@@ -642,6 +676,7 @@ def navigation():
                         view=eye(ch_eye, P.FFL, (-ax[0], -ax[1]), pitch=-6)),
         "lobby": dict(layer=1, pos=M(1.0, -12.6, 2.6), view=eye((lobby_x, lobby_y), P.FFL, (-0.1, 1), check=P.E2)),
         "gallery": dict(layer=1, pos=M(5.0, 14.6, 2.8), view=eye((6.5, 14.6), P.FFL, (-1, -0.25), pitch=-3, check=P.E1)),
+        **art,
         "ramp": dict(layer=1, pos=M(mk[0], mk[1], float(P.ramp_z_of_deg(-20)) + 0.6),
                      view=eye(rp, float(P.ramp_z_of_deg(ramp_phi)),
                               (-math.sin(math.radians(ramp_phi)), math.cos(math.radians(ramp_phi))), pitch=2)),

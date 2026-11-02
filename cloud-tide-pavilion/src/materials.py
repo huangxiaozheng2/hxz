@@ -1,5 +1,8 @@
 """材质库：所有材质集中定义，命名统一以 M_ 开头，便于后续替换。"""
+import os
+
 import bpy
+import numpy as np
 
 
 class NT:
@@ -300,22 +303,26 @@ def distance_haze(name, color, haze=(0.78, 0.72, 0.70, 1), near=250.0, far=1600.
     return m
 
 
-def painting(name, seed=0.0):
+PAINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "paintings")
+
+
+def painting(name, index):
+    """展廊画作：paintings.py 画成的原创作品，作为图片贴在画布上（缺图时先生成）。"""
+    path = os.path.join(PAINT_DIR, f"painting_{index}.jpg")
+    if not os.path.exists(path):
+        import paintings
+        paintings.main(PAINT_DIR)
     m = _new(name); t = NT(m)
-    uvn = t.n("ShaderNodeTexCoord", (-900, 0))
-    nz = t.n("ShaderNodeTexNoise", (-650, 0), **{"Scale": 2.2, "Detail": 3.0, "Distortion": 2.5})
-    nz.noise_dimensions = "4D"
-    nz.inputs["W"].default_value = seed
-    t.link(uvn.outputs["Generated"], nz.inputs["Vector"])
-    ramp = t.n("ShaderNodeValToRGB", (-400, 0))
-    ramp.color_ramp.elements[0].color = (0.08, 0.075, 0.07, 1)
-    ramp.color_ramp.elements[1].color = (0.82, 0.78, 0.70, 1)
-    ramp.color_ramp.elements[0].position = 0.42
-    ramp.color_ramp.elements[1].position = 0.6
-    t.link(nz.outputs["Fac"], ramp.inputs["Fac"])
-    b = t.bsdf(**{"Roughness": 0.8})
-    t.link(ramp.outputs[0], b.inputs["Base Color"])
+    img = bpy.data.images.load(path, check_existing=True)
+    img.pack()                                                    # 图片打包进 .blend，文件自成一体
+    tex = t.n("ShaderNodeTexImage", (-400, 0))
+    tex.image = img
+    b = t.bsdf(**{"Roughness": 0.72})
+    t.link(tex.outputs["Color"], b.inputs["Base Color"])
     t.link(b.outputs[0], t.out.inputs[0])
+    px = np.empty(len(img.pixels), np.float32)                    # 视口色与导出退路：画面平均色
+    img.pixels.foreach_get(px)
+    m.diffuse_color = (*px.reshape(-1, 4)[:, :3].mean(0), 1)
     return m
 
 
@@ -585,7 +592,7 @@ def build_library():
                          hair_strands("M_People_HairStrands_3", color=(0.36, 0.35, 0.34, 1))]
     L["skins"] = [skin(f"M_People_Skin_{k}", c) for k, c in enumerate((
         (0.74, 0.56, 0.45, 1), (0.62, 0.46, 0.36, 1), (0.52, 0.36, 0.26, 1), (0.36, 0.24, 0.17, 1)))]
-    L["art"] = [painting(f"M_Art_{i}", seed=i * 3.7) for i in range(4)]
+    L["art"] = [painting(f"M_Art_{i}", i) for i in range(6)]
     # 湖岸城区与对岸
     L["town"] = {
         "jiangnan": facade("M_Facade_Jiangnan", (0.86, 0.845, 0.81, 1), glass=(0.07, 0.055, 0.045, 1), bay=3.0, floor=3.4,
