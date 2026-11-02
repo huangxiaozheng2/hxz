@@ -1,0 +1,667 @@
+<title>云上潮汐馆</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&family=Noto+Sans+SC:wght@400;500&display=swap">
+<style>
+/* 版式：一列展册 —— 标题 → 主视图 → 可转动模型 → 分图 → 设计说明 */
+:root {
+  --paper: #f5f2ec;      /* 象牙白纸面 */
+  --ink: #2b2a27;        /* 正文 */
+  --muted: #77706a;      /* 次要文字 */
+  --rule: #ddd5ca;       /* 细线 */
+  --oak: #a87d52;        /* 木肋色，用作强调 */
+  --tide: #1f3a4d;       /* 潮汐深蓝 */
+  --card: #fbf9f5;
+  --display: "Noto Serif SC", "Songti SC", "STSong", serif;
+  --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --gutter: clamp(16px, 4vw, 48px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141a1f; --ink: #ece6dc; --muted: #a39b91; --rule: #2e363d;
+    --oak: #d2a678; --tide: #9cc1d8; --card: #1a2128; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141a1f; --ink: #ece6dc; --muted: #a39b91; --rule: #2e363d;
+  --oak: #d2a678; --tide: #9cc1d8; --card: #1a2128; color-scheme: dark;
+}
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.75; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: var(--gutter); padding-block: 0 64px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
+header.top { text-align: center; padding-block: 44px 28px; }
+header.top h1 { font-size: clamp(34px, 6vw, 56px); letter-spacing: .32em; padding-left: .32em; font-weight: 400; }
+header.top .sub { margin-top: 10px; color: var(--muted); font-size: 13px; letter-spacing: .3em; }
+header.top .sub::before { content: ""; display: block; width: 220px; max-width: 60%; height: 1px; background: var(--rule); margin: 0 auto 12px; }
+figure { margin: 0; }
+.hero img { width: 100%; height: auto; display: block; border-radius: 2px; cursor: zoom-in; }
+.cap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 13px; padding-top: 8px; }
+section { margin-top: 64px; }
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--rule); padding-bottom: 10px; margin-bottom: 20px; }
+.sec-head h2 { font-size: 24px; letter-spacing: .12em; }
+.sec-head p { margin: 0; color: var(--muted); font-size: 13px; }
+
+/* 3D 视窗：固定的黄昏天色，不随主题变化 */
+.viewer { position: relative; aspect-ratio: 16 / 9; max-height: 78vh; width: 100%; max-width: 100%; border-radius: 3px; overflow: hidden;
+  background: linear-gradient(180deg, #8fb0c8 0%, #c9d3d8 46%, #ecd6c2 62%, #3c5466 63%, #1c3242 100%); }
+.viewer canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.viewer .status { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 14px; letter-spacing: .1em; text-shadow: 0 1px 6px rgba(0,0,0,.4); pointer-events: none; }
+.viewer .hint { position: absolute; left: 14px; bottom: 12px; color: rgba(255,255,255,.88); font-size: 12px; text-shadow: 0 1px 4px rgba(0,0,0,.5); pointer-events: none; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.controls button { font: inherit; font-size: 13px; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+.controls button:hover { border-color: var(--oak); }
+.controls button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.controls button:focus-visible, .shot:focus-visible { outline: 2px solid var(--oak); outline-offset: 2px; }
+.controls .sep { width: 1px; background: var(--rule); margin-inline: 4px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 12px; }
+.boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; margin-top: 12px; }
+.boards .shot img { aspect-ratio: 4200 / 2970; }
+.boards .shot span { color: #2b2a27; text-shadow: none; background: rgba(247, 244, 238, .9); padding: 2px 10px; border-radius: 3px; }
+.plans-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 40px; align-items: start; }
+.plans-grid .shot img { aspect-ratio: auto; object-fit: contain; }
+@media (max-width: 860px) { .plans-grid { grid-template-columns: minmax(0, 1fr); } }
+.shot { position: relative; padding: 0; border: 0; background: none; cursor: zoom-in; display: block; text-align: left; }
+.shot img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; border-radius: 2px; }
+.shot span { position: absolute; left: 12px; bottom: 9px; color: #fff; font-size: 14px; letter-spacing: .08em; text-shadow: 0 1px 6px rgba(0,0,0,.55); }
+.wide { margin-top: 12px; }
+
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 32px 48px; }
+.notes h3 { font-size: 18px; letter-spacing: .08em; margin-bottom: 8px; }
+.notes p { margin: 0 0 10px; max-width: 62ch; }
+.spec { overflow-x: auto; margin-top: 28px; }
+.spec table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 520px; }
+.spec th, .spec td { text-align: left; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.spec th { font-weight: 500; white-space: nowrap; color: var(--oak); width: 7em; }
+.spec td.n { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); width: 12em; }
+footer { margin-top: 64px; color: var(--muted); font-size: 12px; text-align: center; letter-spacing: .1em; }
+
+.lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(10, 14, 18, .92); display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
+.lightbox[hidden] { display: none; }
+.lightbox img { max-width: 100%; max-height: 86vh; object-fit: contain; }
+.lightbox p { color: #e9e3da; margin: 10px 0 0; text-align: center; letter-spacing: .1em; }
+@media (max-width: 560px) { .controls .sep { display: none; } }
+.compare { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 3px; user-select: none; }
+.compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.compare-top { position: absolute; inset: 0; clip-path: inset(0 50% 0 0); }
+.compare-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.4); pointer-events: none; }
+.compare input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.compare input[type=range]:focus-visible + .compare-line, .compare:focus-within .compare-line { outline: 2px solid var(--oak); }
+.tag { position: absolute; top: 12px; color: #fff; font-size: 13px; letter-spacing: .08em; background: rgba(20, 30, 38, .45); padding: 3px 10px; border-radius: 999px; pointer-events: none; }
+.tag-l { left: 12px; } .tag-r { right: 12px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.diagram { margin-top: 16px; }
+.diagram img { width: 100%; display: block; border-radius: 2px; }
+.diagram.narrow { max-width: 760px; }
+.axis-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; align-items: start; }
+.axis-pair { display: grid; gap: 12px; }
+.shot.plan img { aspect-ratio: auto; object-fit: contain; }
+.shot span.dark { color: var(--ink); text-shadow: none; top: 10px; bottom: auto; }
+.section-scroll { overflow-x: auto; margin-top: 12px; }
+.section-scroll img { width: 100%; min-width: 760px; display: block; }
+@media (max-width: 760px) { .axis-grid { grid-template-columns: minmax(0, 1fr); } }
+.axo { margin: 0; }
+.axo img { width: 100%; height: auto; display: block; border-radius: 2px; cursor: zoom-in; }
+.struct-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px 40px; margin-top: 28px; align-items: start; }
+.struct-grid h3 { font-size: 18px; letter-spacing: .08em; margin-bottom: 10px; }
+.load { margin: 0; padding-left: 1.6em; }
+.load li { margin-bottom: 4px; }
+.load li::marker { color: var(--oak); font-variant-numeric: tabular-nums; }
+.struct-grid .spec { margin-top: 0; }
+.struct-grid .spec table { min-width: 460px; }
+.fine { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+.mat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 22px; }
+@media (max-width: 760px) { .mat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.mat-grid figure { margin: 0; }
+.mat-grid img { width: 100%; aspect-ratio: 500 / 390; object-fit: cover; display: block; border-radius: 2px; }
+.mat-grid figcaption { margin-top: 8px; font-size: 15px; line-height: 1.5; }
+.mat-grid figcaption i { display: inline-block; width: 14px; height: 14px; border: 1px solid var(--rule); vertical-align: -2px; margin-right: 8px; }
+.mat-grid figcaption span { display: block; color: var(--muted); font-size: 13px; padding-left: 23px; }
+@media (max-width: 860px) { .struct-grid { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>云上潮汐馆</h1>
+    <div class="sub">从潮到云 · CLOUD TIDE PAVILION</div>
+  </header>
+
+  <figure class="hero">
+    <img src="img/hero.jpg" alt="整体外观：水面上的月牙形展馆，主屋顶西翼尖由 Y 形斜柱托起" data-cap="整体外观 · 冬至傍晚 · 高潮位" width="2400" height="1000">
+    <figcaption class="cap"><span>整体外观 · 冬至傍晚 · 高潮位</span><span>三片月牙屋顶环抱一座会随潮涨落的庭院</span></figcaption>
+  </figure>
+
+  <section id="idea">
+    <div class="sec-head">
+      <h2>设计说明</h2>
+      <p>北纬 30° · 潮差 0.95 m</p>
+    </div>
+    <div class="notes">
+      <div>
+        <h3>潮汐庭院</h3>
+        <p>三片月牙屋顶交错环抱一座阶梯式潮池。潮池经西南的水口与外部水面相通，一日两涨两落：高潮时池水漫至第三级台阶，低潮时整池露底，留下潮痕。同一个庭院，一天里两次改变模样。</p>
+      </div>
+      <div>
+        <h3>从潮到云</h3>
+        <p>一层展廊贴近水面，外墙为象牙白实墙，只开四处深框景窗，天光从屋面光缝顺墙洗下。廊中三段展墙挂着六幅画，题材取自这座展馆本身：湖山、冬至落日、月洞、潮痕、夜湖、芦汀白鹭。1:12 无障碍坡道绕潮池上升约两圈，到达屋面平台，终点是次屋顶下的观景厅。</p>
+      </div>
+      <div>
+        <h3>冬至日落轴线</h3>
+        <p>水口、潮池与平台西端的月洞墙同指冬至日落方位 242.6°。冬至傍晚，夕阳沿水口照进潮池，同一时刻也穿过月洞，落在观景厅里。</p>
+      </div>
+      <div>
+        <h3>功能与疏散</h3>
+        <p>展廊东端尖角是卫生间（含无障碍）与储藏，设备间与雨水蓄水池在基座里。屋面平台有两个出口：坡道，和电梯以西的封闭疏散楼梯间。楼梯间一层的墙面兼作展墙，上部是观景厅的北墙。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="site">
+    <div class="sec-head">
+      <h2>区位与到达</h2>
+      <p>设定场地：北纬 30° 湖泊 · 点击查看大图</p>
+    </div>
+    <div class="axis-grid">
+      <button class="shot plan" type="button"><img src="img/location.png" alt="区位：湖面、西南岸湖岸公园与滨水步道、入口广场、约 80 m 的栈桥、展馆与湖中小岛、滨湖路与城区" loading="lazy"></button>
+      <div class="axis-pair">
+        <button class="shot" type="button"><img src="img/approach.jpg" alt="鸟瞰：湖岸公园与入口广场，栈桥穿过湖面通向展馆" loading="lazy"><span>自湖岸公园经栈桥入馆</span></button>
+        <button class="shot" type="button"><img src="img/arrival.jpg" alt="入口广场人视：游人走向栈桥，湖心是展馆" loading="lazy"><span>入口广场 · 走向栈桥</span></button>
+      </div>
+    </div>
+    <p class="fine">展馆离岸约 67 m。西南岸是一处湖岸公园：石砌驳岸、6 m 宽的滨水步道、栈桥入口广场与通往滨湖路的园路；步道内侧种垂柳，其后是成片的阔叶大树、灌木与松。公园以南是滨湖城区：临路两三层的白墙灰瓦小楼与现代低层，其后是 5–8 层住宅与 8–16 层的后排建筑，近湖处压低高度；对岸约 1 km 外是城镇天际线与山顶的七层塔。岸线避开冬至日落方向，夕阳仍落在开阔水面上。</p>
+  </section>
+
+  <section id="form">
+    <div class="sec-head">
+      <h2>形体生成</h2>
+      <p>潮池 → 三片月牙 → 错落升起 → 对准冬至日落 · 点击查看大图</p>
+    </div>
+    <div class="section-scroll">
+      <button class="shot plan" type="button" style="width: 100%"><img src="img/form.png" alt="形体生成四步轴测：一，台基上的阶梯潮池经水口与湖面相通；二，三片月牙屋顶环抱潮池、彼此交错；三，主屋顶西翼尖扬起、次屋顶叠于其上、低檐伏于水面；四，揭开次屋顶露出月洞墙，月洞视线与水口、潮池的轴线平行，同指冬至日落方位 242.6°" loading="lazy"></button>
+    </div>
+  </section>
+
+  <section id="layers">
+    <div class="sec-head">
+      <h2>分层构成</h2>
+      <p>爆炸轴测 · 点击查看大图</p>
+    </div>
+    <figure class="diagram" style="max-width: 980px"><button class="shot plan" type="button" style="width: 100%"><img src="img/exploded.png" alt="爆炸轴测：自下而上为基座与潮池、首层（展廊、门厅、坡道、电梯筒、疏散楼梯间、Y 形斜柱）、主屋顶与低檐及屋面平台、观景厅与月洞墙、次屋顶，各层以虚线对位" loading="lazy"></button></figure>
+  </section>
+
+  <section id="tide">
+    <div class="sec-head">
+      <h2>涨潮与落潮</h2>
+      <p>拖动滑块对比同一机位的两种潮位</p>
+    </div>
+    <div class="compare" id="compare">
+      <img src="img/court_lt.jpg" alt="落潮：潮池露底，台阶与池底留下潮痕" width="1600" height="1000">
+      <div class="compare-top" id="compare-top"><img src="img/court_ht.jpg" alt="涨潮：池水漫至第三级台阶" width="1600" height="1000"></div>
+      <div class="compare-line" id="compare-line" aria-hidden="true"></div>
+      <span class="tag tag-l">涨潮 ±0.00</span><span class="tag tag-r">落潮 -0.95</span>
+      <label class="sr" for="compare-range">涨潮与落潮对比位置</label>
+      <input type="range" id="compare-range" min="0" max="100" value="50">
+    </div>
+    <figure class="diagram narrow"><img src="img/tide_curve.png" alt="潮位曲线：一日两涨两落，标出各级台阶与池底标高" loading="lazy"></figure>
+  </section>
+
+  <section id="axis">
+    <div class="sec-head">
+      <h2>日落轴线</h2>
+      <p>点击查看大图</p>
+    </div>
+    <div class="axis-grid">
+      <button class="shot plan" type="button"><img src="img/plan_axis.png" alt="总平面：三片屋顶、潮池、水口、月洞墙与冬至日落轴线" loading="lazy"><span class="dark">总平面</span></button>
+      <div class="axis-pair">
+        <button class="shot" type="button"><img src="img/axis.jpg" alt="站在潮池台阶上沿水口望向冬至落日" loading="lazy"><span>夕阳沿水口照进潮池</span></button>
+        <button class="shot" type="button"><img src="img/moon.jpg" alt="观景厅内，夕阳穿过月洞墙的圆洞" loading="lazy"><span>同一时刻穿过月洞</span></button>
+      </div>
+    </div>
+    <div class="section-scroll">
+      <img src="img/section.png" alt="沿冬至日落轴线的长剖面：潮位、潮池台阶、坡道各圈、三片屋顶与胶合木梁" loading="lazy">
+    </div>
+  </section>
+
+  <section id="plans">
+    <div class="sec-head">
+      <h2>平面与流线</h2>
+      <p>橙色虚线为距出口最远点的步行路线 · 点击查看大图</p>
+    </div>
+    <div class="plans-grid">
+      <button class="shot plan" type="button"><img src="img/plan_ground.png" alt="首层平面：展廊、门厅、卫生间与储藏、疏散楼梯间、电梯、潮池与坡道起点、四个对外门与疏散路线" loading="lazy"></button>
+      <div>
+        <button class="shot plan" type="button"><img src="img/plan_deck.png" alt="屋面平台平面：观景厅、疏散楼梯间、电梯、月洞墙、坡道到达点与两条疏散路线" loading="lazy"></button>
+        <div class="spec" style="margin-top: 20px">
+          <table>
+            <caption class="sr">功能与面积</caption>
+            <tbody>
+              <tr><th>展廊</th><td>首层，外侧实墙，四处框景窗</td><td class="n">233 m²</td></tr>
+              <tr><th>门厅</th><td>首层，含接待</td><td class="n">60 m²</td></tr>
+              <tr><th>卫生间</th><td>首层，展廊东端，含无障碍；旁为储藏与设备检修口</td><td class="n">11 + 3 m²</td></tr>
+              <tr><th>疏散楼梯间</th><td>钢筋混凝土筒，双跑，首层直达屋面平台</td><td class="n">20 m²</td></tr>
+              <tr><th>电梯</th><td>首层—屋面平台</td><td class="n">4 m²</td></tr>
+              <tr><th>观景厅</th><td>屋面平台，次屋顶之下，三处门</td><td class="n">46 m²</td></tr>
+              <tr><th>屋面平台</th><td>室外</td><td class="n">101 m²</td></tr>
+              <tr><th>设备间</th><td>基座箱体内，净高约 2.2 m</td><td class="n">27 m²</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="fine">疏散距离按 0.25 m 网格计算，墙与玻璃不可穿越：首层任一点到最近对外门步行 ≤ 16 m（直线 ≤ 15 m）；屋面平台到最近出口步行 ≤ 23 m（直线 ≤ 12 m），两出口相距约 10 m。对照 GB 50016 第 5.5.17 条，展览厅内任一点至最近疏散门的直线距离不大于 30 m。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="drawings">
+    <div class="sec-head">
+      <h2>立面与剖面</h2>
+      <p>标高以设计高潮位为 ±0.00 · 点击查看大图</p>
+    </div>
+    <div class="section-scroll">
+      <button class="shot plan" type="button" style="width: 100%"><img src="img/elevation_south.png" alt="南立面：三片屋顶层叠，次屋顶最高点约 +12.2；Y 形斜柱托起主屋顶西翼尖，后方可见月洞墙；首层玻璃与临水栏杆；栈桥在台基南缘外剖切；标出屋面平台、首层与高低潮位" loading="lazy"></button>
+    </div>
+    <div class="section-scroll">
+      <button class="shot plan" type="button" style="width: 100%"><img src="img/section_2.png" alt="2-2 横剖面：南侧门厅、潮池台阶与坡道、北侧展廊、疏散楼梯间，以及屋面平台上的观景厅与月洞墙" loading="lazy"></button>
+    </div>
+  </section>
+
+  <section id="model">
+    <div class="sec-head">
+      <h2>三维模型</h2>
+      <p>建筑、庭院、展廊画作、人物、湖岸公园与滨湖城区 · 简化材质</p>
+    </div>
+    <div class="viewer" id="viewer">
+      <div class="status" id="status">正在载入模型…</div>
+      <div class="hint">拖动旋转 · 滚轮或双指缩放 · 右键或双指拖动平移</div>
+    </div>
+    <div class="controls" role="group" aria-label="视角与潮位">
+      <button type="button" id="v-eye" data-view="eye">人视</button>
+      <button type="button" id="v-air" data-view="air">鸟瞰</button>
+      <button type="button" id="v-axis" data-view="axis">沿日落轴线</button>
+      <button type="button" id="v-court" data-view="court">潮池内</button>
+      <button type="button" id="v-approach" data-view="approach">湖岸鸟瞰</button>
+      <button type="button" id="v-arrival" data-view="arrival">到达</button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="v-cut" aria-pressed="false">首层剖切</button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="t-high" data-tide="0" aria-pressed="true">涨潮</button>
+      <button type="button" id="t-low" data-tide="-0.95" aria-pressed="false">落潮</button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="v-spin" aria-pressed="false">自动旋转</button>
+    </div>
+    <p class="fine">“首层剖切”在首层地面以上 1.4 m 处把建筑水平剖开，可以看到疏散楼梯间、电梯、卫生间、展陈与柱网；水面为实时倒影。湖岸树木、城区与人物为网页简化版：叶片已抽稀，建筑立面不含窗格，发丝以发型体块代替；对岸远景隐在雾里。</p>
+  </section>
+
+  <section id="views">
+    <div class="sec-head">
+      <h2>分图</h2>
+      <p>Cycles 渲染 · 点击查看大图</p>
+    </div>
+    <div class="grid" id="grid">
+      <button class="shot" type="button"><img src="img/aerial.jpg" alt="鸟瞰：三片月牙环抱潮池" loading="lazy"><span>鸟瞰全貌</span></button>
+      <button class="shot" type="button"><img src="img/axis_out.jpg" alt="沿日落轴线从水面看水口与 Y 形斜柱" loading="lazy"><span>水口与 Y 形斜柱</span></button>
+      <button class="shot" type="button"><img src="img/interior.jpg" alt="一层展廊东段：电梯筒、铜雕，右侧墙上是《冬至落日》" loading="lazy"><span>展廊东段</span></button>
+      <button class="shot" type="button"><img src="img/gallery.jpg" alt="一层展廊西段：疏散楼梯间的墙面兼作展墙，挂着《潮痕》《月洞》两幅画，西端为防火门" loading="lazy"><span>展廊西段 · 楼梯间墙上的《潮痕》《月洞》</span></button>
+      <button class="shot" type="button"><img src="img/terrace.jpg" alt="屋面平台：越过庭院望向月洞墙" loading="lazy"><span>屋面平台</span></button>
+      <button class="shot" type="button"><img src="img/stair.jpg" alt="一层西厅的悬浮螺旋阶梯与吊挂圆台" loading="lazy"><span>悬浮螺旋阶梯</span></button>
+      <button class="shot" type="button"><img src="img/structure.jpg" alt="Y 形斜柱柱头与加深的胶合木径向梁" loading="lazy"><span>斜柱与胶合木梁</span></button>
+      <button class="shot" type="button"><img src="img/detail.jpg" alt="门厅屋檐：金属包边、木梁、幕墙收口与柱头" loading="lazy"><span>檐口细部</span></button>
+    </div>
+    <button class="shot wide" type="button" style="margin-bottom: 12px"><img src="img/lakeview.jpg" alt="自湖面东北望向西南：展馆在前，栈桥连向湖岸公园，其后是滨湖城区，夕阳在右" loading="lazy" style="aspect-ratio: 12 / 5"><span>湖上看展馆 · 其后是湖岸公园与滨湖城区</span></button>
+    <button class="shot wide" type="button"><img src="img/dusk.jpg" alt="黄昏：室内与檐下灯带亮起" loading="lazy" style="aspect-ratio: 12 / 5"><span>黄昏 · 让建筑自己发光</span></button>
+    <div class="boards">
+      <button class="shot" type="button"><img src="img/board_01.jpg" alt="展板一：概念与形象" loading="lazy"><span>展板 1 · 概念与形象</span></button>
+      <button class="shot" type="button"><img src="img/board_02.jpg" alt="展板二：总平面、长剖面、涨落潮与构造" loading="lazy"><span>展板 2 · 技术与细部</span></button>
+      <button class="shot" type="button"><img src="img/board_03.jpg" alt="展板三：首层与屋面平台平面、面积、疏散与无障碍" loading="lazy"><span>展板 3 · 平面与流线</span></button>
+      <button class="shot" type="button"><img src="img/board_04.jpg" alt="展板四：结构轴测、支承距离与抗侧力、主要构件与初步校核" loading="lazy"><span>展板 4 · 结构</span></button>
+      <button class="shot" type="button"><img src="img/board_05.jpg" alt="展板五：形体生成四步与环境策略剖面" loading="lazy"><span>展板 5 · 生成与环境</span></button>
+      <button class="shot" type="button"><img src="img/board_06.jpg" alt="展板六：南立面、2-2 剖面与 1:20 檐口节点" loading="lazy"><span>展板 6 · 立面与构造</span></button>
+      <button class="shot" type="button"><img src="img/board_07.jpg" alt="展板七：爆炸轴测、日照分析与材料" loading="lazy"><span>展板 7 · 分层、日照与材料</span></button>
+    </div>
+  </section>
+
+  <section id="structure">
+    <div class="sec-head">
+      <h2>结构体系</h2>
+      <p>屋面半透明显示，承重构件为橙色 · 点击查看大图</p>
+    </div>
+    <figure class="axo"><img src="img/struct_axo.jpg" alt="结构轴测图：三片屋顶半透明，胶合木主梁、钢环梁、柱、二层柱、电梯筒、疏散楼梯间、月洞墙、Y 形斜柱、水中石墩与坡道钢柱以橙色显示" data-cap="结构轴测 · 屋面半透明" width="2400" height="1560" loading="lazy"></figure>
+    <div class="struct-grid">
+      <div>
+        <h3>荷载路径</h3>
+        <ol class="load">
+          <li>屋面板：轻钢龙骨 + 20 mm GRC 面层</li>
+          <li>次肋：100 mm 木格栅，间距约 240 mm</li>
+          <li>主梁：胶合木 GL28h，约 1.5 m 一根，与幕墙分格对齐；高 200 mm（檐口）加深到 480–600 mm（支座）</li>
+          <li>柱顶环梁：钢箱梁 220 宽，收集主梁荷载</li>
+          <li>柱 φ194×10 / 承重墙 / 电梯筒 φ2.3 m / 疏散楼梯间 / Y 形斜柱 / 水中石墩</li>
+          <li>钻孔灌注桩：基座与石墩之下</li>
+        </ol>
+      </div>
+      <div>
+        <h3>支承布置</h3>
+        <p style="margin: 0 0 8px">次屋顶的柱立在主屋顶结构层上，与一层内侧柱上下对齐；月洞墙与楼梯间旁由墙直接承托，不再设柱，月洞框景里因此没有柱子。</p>
+        <p style="margin: 0 0 8px">主屋顶西翼尖由水中石墩上的 Y 形斜柱两肢托起；低檐东翼尖下的基座已切除，由两处水中石墩承托。屋面上任一点到最近竖向支承都不超过 5.8 m（下图）。</p>
+        <h3 style="margin-top: 20px">抗侧力与风</h3>
+        <p style="margin: 0 0 8px">水平力由电梯筒、疏散楼梯间两处钢筋混凝土筒体与展廊北侧弧形墙、月洞墙承担；屋面板下设钢拉杆水平支撑形成刚性隔板，其余柱为铰接。低檐 C 下没有墙，门厅柱柱脚刚接，与环梁形成钢框架。</p>
+        <p style="margin: 0">开阔水面上的大挑檐由风吸控制连接：柱头设抗拔螺栓，主梁下缘由木格栅侧向约束，承受反向弯矩。</p>
+      </div>
+    </div>
+    <figure class="diagram"><button class="shot plan" type="button" style="width: 100%"><img src="img/support_map.png" alt="支承距离图与抗侧力体系：三片屋面上每一点到最近支承的距离，最远 5.4–5.8 m；第四格为承担水平力的筒体、墙与刚接柱" loading="lazy"></button></figure>
+    <div class="struct-grid">
+      <div class="spec">
+        <table>
+          <caption class="sr">初步校核</caption>
+          <thead><tr><th>初步校核</th><td>跨度 / 截面</td><td class="n">应力比 · 挠度</td></tr></thead>
+          <tbody>
+            <tr><th>A 主梁悬挑</th><td>5.7 m · 160×600</td><td class="n">0.35 · L/536</td></tr>
+            <tr><th>B 主梁悬挑</th><td>5.3 m · 160×520</td><td class="n">0.42 · L/412</td></tr>
+            <tr><th>C 主梁悬挑</th><td>5.8 m · 160×480</td><td class="n">0.58 · L/258</td></tr>
+            <tr><th>平台主梁</th><td>7.3 m 简支 · 160×600</td><td class="n">0.50 · L/739</td></tr>
+            <tr><th>一层柱</th><td>φ194×10 · 轴力 305 kN</td><td class="n">0.23（稳定承载 1355 kN）</td></tr>
+            <tr><th>风吸</th><td>净上吸 0.33 kPa · 柱头拉力约 7 kN</td><td class="n">主梁反弯 0.07</td></tr>
+            <tr><th>门厅刚接柱</th><td>12 根 · 柱底弯矩 44 kN·m</td><td class="n">0.37 · 侧移 H/176（悬臂计）</td></tr>
+            <tr><th>筒体抗剪</th><td>设计风剪力 465 kN（地震 248 kN）</td><td class="n">承载约为其 5.3 倍</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="fine">荷载：屋面恒载 1.5 / 活载 0.5 kPa，屋面平台恒载 3.0 / 活载 3.5 kPa，分项系数 1.3 / 1.5；基本风压 0.55 kPa，A 类地貌，风振系数取 1.2；地震 7 度（0.10 g）。悬挑一律按“到最近支承的距离”当作悬臂计算，偏保守。这是方案阶段的手算，只用来确认构件尺度与体系；深化阶段需由结构工程师建模复核风荷载、地震、节点、筒体与桩基。</p>
+    </div>
+  </section>
+
+  <section id="environment">
+    <div class="sec-head">
+      <h2>环境策略</h2>
+      <p>以 2-2 剖面示意 · 点击查看大图</p>
+    </div>
+    <div class="section-scroll">
+      <button class="shot plan" type="button" style="width: 100%"><img src="img/environment.png" alt="环境策略剖面：冬至与夏至正午日照和挑檐遮阳、庭院拔风、展廊经屋面光缝排风、湖水源热泵与地板辐射、屋面雨水回用、天光洗墙与西晒遮挡" loading="lazy"></button>
+    </div>
+    <p class="fine">太阳高度按北纬 30° 计算：冬至正午 36.6°，夏至正午 83.4°。通风、热泵与雨水回用是方案策略，尚未做模拟；深化阶段需要做风环境、采光与能耗计算。</p>
+  </section>
+
+  <section id="solar">
+    <div class="sec-head">
+      <h2>日照分析</h2>
+      <p>在模型上做光线追踪 · 点击查看大图</p>
+    </div>
+    <div class="section-scroll">
+      <button class="shot plan" type="button" style="width: 100%"><img src="img/solar.png" alt="日照分析：北纬 30° 太阳轨迹图标出冬至日落 242.6° 轴线；冬至与夏至一天中潮池水面和门厅地面被晒到的面积曲线；首层地面与潮池的直射日照时数分布" loading="lazy"></button>
+    </div>
+    <p class="fine">在模型上逐点向太阳做光线追踪，每 10 分钟一次，首层地面按 0.5 m 网格取样；玻璃按透光计，庭院的树参与遮挡。正午门厅地面冬至有 41% 晒到太阳，夏至为 0（挑檐挡住），夏至的日照集中在清晨和傍晚的低角度斜照；潮池在夏至反而更晒，因为庭院中央向天空敞开。</p>
+  </section>
+
+  <section id="materials">
+    <div class="sec-head">
+      <h2>材料</h2>
+      <p>取自渲染图的局部 · 色块为材质规格色</p>
+    </div>
+    <div class="mat-grid">
+      <figure><img src="img/mat_0.jpg" alt="象牙白 GRC 与矿物涂料墙面" loading="lazy"><figcaption><i style="background:#efece6"></i>象牙白 GRC · 矿物涂料<span>屋面面层与展廊实墙</span></figcaption></figure>
+      <figure><img src="img/mat_1.jpg" alt="胶合木主梁与木格栅" loading="lazy"><figcaption><i style="background:#dfcbb3"></i>胶合木 GL28h<span>主梁约 1.5 m 一根，100 mm 木格栅</span></figcaption></figure>
+      <figure><img src="img/mat_2.jpg" alt="拉丝香槟金属：Y 形斜柱与檐口包边" loading="lazy"><figcaption><i style="background:#e5e2dd"></i>拉丝香槟金属<span>檐口包边、扶手、Y 形斜柱</span></figcaption></figure>
+      <figure><img src="img/mat_3.jpg" alt="Low-E 中空夹胶玻璃幕墙与竖梃" loading="lazy"><figcaption><i style="background:#f7fbfa"></i>Low-E 中空夹胶玻璃<span>幕墙分格约 1.5 m，顶部金属收口</span></figcaption></figure>
+      <figure><img src="img/mat_4.jpg" alt="潮池石材台阶，落潮时露出" loading="lazy"><figcaption><i style="background:#dad6d0"></i>潮池石材<span>高潮位以下颜色加深、表面湿润</span></figcaption></figure>
+      <figure><img src="img/mat_5.jpg" alt="花岗岩铺装的入口广场" loading="lazy"><figcaption><i style="background:#a49f97"></i>花岗岩铺装<span>栈桥与湖岸步道</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="notes">
+    <div class="sec-head">
+      <h2>构造</h2>
+      <p>标高以设计高潮位为 ±0.00，单位米</p>
+    </div>
+    <figure class="diagram" style="margin: 0 0 24px"><button class="shot plan" type="button" style="width: 100%"><picture><source media="(max-width: 760px)" srcset="img/detail_eave_tall.png"><img src="img/detail_eave.png" alt="1:20 门厅外檐节点：GRC 屋面板与防水保温、楔形挑檐与金属包边、阴影缝、檐沟与虹吸雨水斗、胶合木主梁与木格栅、钢环梁与柱头、幕墙收口、临水栏杆、地暖楼面与混凝土箱体" loading="lazy"></picture></button></figure>
+    <div class="spec">
+      <table>
+        <tbody>
+          <tr><th>主屋顶 A</th><td>展廊内侧柱列、北侧承重实墙与电梯筒共同支承；西翼尖由水中石墩上的 Y 形斜柱托起</td><td class="n">翼尖 +11.2</td></tr>
+          <tr><th>次屋顶 B</th><td>二层柱（与一层柱对齐）、电梯筒、疏散楼梯间、月洞墙与观景厅东端弧墙支承</td><td class="n">电梯筒 φ2.3 m</td></tr>
+          <tr><th>低檐 C</th><td>门厅柱列支承；东翼尖由两处水中石墩上的钢柱承托</td><td class="n">石墩高出高潮位 0.6 m</td></tr>
+          <tr><th>木梁</th><td>胶合木主梁约 1.5 m 一根，向支座加深；其间为 100 mm 木格栅，端部收于阴影缝内线</td><td class="n">200 → 600 mm</td></tr>
+          <tr><th>屋檐</th><td>楔形截面，半圆形拉丝金属包边，檐下深色阴影缝</td><td class="n">边缘 0.15 m</td></tr>
+          <tr><th>展廊外墙</th><td>象牙白矿物质实墙，四处两跨宽框景窗，外挑古铜色深窗框</td><td class="n">窗框外挑 0.62 m</td></tr>
+          <tr><th>天光</th><td>沿展廊外墙内侧的屋面光缝，漫射天光顺墙洗下</td><td class="n">8 段 · 宽 0.7 m</td></tr>
+          <tr><th>雨水</th><td>檐沟内虹吸雨水斗，立管藏于钢柱与承重墙内，汇入基座蓄水池，回用于冲厕与潮池补水；翼尖低点设溢流口</td><td class="n">柱内 DN100</td></tr>
+          <tr><th>潮池</th><td>四级石砌台阶，高潮位以下石材颜色加深、表面湿润，低潮时显出潮痕</td><td class="n">池底 -0.65</td></tr>
+          <tr><th>坡道</th><td>1:12，每升 0.68 m 设 1.5 m 平台；螺旋钢箱梁，外侧 φ180 钢柱每 30° 一根，以钢悬臂托住各圈</td><td class="n">全长约 78 m</td></tr>
+          <tr><th>韧性</th><td>首层高出设计高潮位，潮池与水口按日常淹没设计</td><td class="n">首层 +0.85</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Blender 程序化建模 · Cycles 渲染 · 分析图与模型来自同一套几何 · 三维视窗使用 three.js</footer>
+</div>
+
+<div class="lightbox" id="lightbox" hidden>
+  <figure><img id="lb-img" alt=""><p id="lb-cap"></p></figure>
+</div>
+
+<script>
+// 大图查看
+(function () {
+  const lb = document.getElementById('lightbox');
+  const img = document.getElementById('lb-img');
+  const cap = document.getElementById('lb-cap');
+  function open(src, alt, text) { img.src = src; img.alt = alt; cap.textContent = text; lb.hidden = false; }
+  document.querySelectorAll('.shot').forEach(b => b.addEventListener('click', () => {
+    const i = b.querySelector('img'), s = b.querySelector('span');
+    open(i.currentSrc || i.src, i.alt, s ? s.textContent : '');
+  }));
+  document.querySelectorAll('.hero img, .axo img').forEach(i =>
+    i.addEventListener('click', () => open(i.currentSrc || i.src, i.alt, i.dataset.cap)));
+  lb.addEventListener('click', () => { lb.hidden = true; });
+  // 涨落潮对比滑块
+  const range = document.getElementById('compare-range');
+  const top = document.getElementById('compare-top');
+  const line = document.getElementById('compare-line');
+  function setCmp() { const v = range.value; top.style.clipPath = `inset(0 ${100 - v}% 0 0)`; line.style.left = v + '%'; }
+  range.addEventListener('input', setCmp); setCmp();
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') lb.hidden = true; });
+})();
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Water } from 'three/addons/objects/Water.js';
+
+const box = document.getElementById('viewer');
+const status = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.85;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled = true;
+box.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd9d4cf, 260, 900);
+// 天空：等距柱状渐变（天顶蓝 → 地平线暖灰，与雾同色），水面倒影里也有天
+{
+  const c = document.createElement('canvas'); c.width = 16; c.height = 256;
+  const g = c.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#6f97b6'); grad.addColorStop(0.3, '#a9bfcd'); grad.addColorStop(0.44, '#cfd2d0');
+  grad.addColorStop(0.5, '#d9d4cf'); grad.addColorStop(1, '#d9d4cf');
+  g.fillStyle = grad; g.fillRect(0, 0, 16, 256);
+  const sky = new THREE.CanvasTexture(c);
+  sky.mapping = THREE.EquirectangularReflectionMapping; sky.colorSpace = THREE.SRGBColorSpace;
+  scene.background = sky;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(38, 16 / 9, 0.1, 2000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.minDistance = 1;
+controls.maxDistance = 320;
+
+// 低角度暖色夕照（与渲染图同方位：冬至日落）
+scene.add(new THREE.HemisphereLight(0xcfe0ee, 0x6a5a4a, 0.9));
+const sun = new THREE.DirectionalLight(0xffd2a1, 2.6);
+sun.position.set(-53, 9, 27.6);   // 冬至日落方位 242.6°
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 200 });
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+
+// 水面：实时平面倒影 + 缓慢流动的细波纹（法线贴图），近处倒影随波纹轻轻扭曲
+const waterNormals = new THREE.TextureLoader().load('img/waternormals.jpg', t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
+const rt = matchMedia('(max-width: 760px)').matches ? 512 : 1024;
+const water = new Water(new THREE.CircleGeometry(1200, 96), {
+  textureWidth: rt, textureHeight: rt, waterNormals,
+  sunDirection: sun.position.clone().normalize(), sunColor: 0xffd2a1, waterColor: 0x1b3443,
+  distortionScale: 0.9, fog: true, alpha: 1.0,
+});
+water.material.uniforms.size.value = 9.0;
+// 湖水吸收一部分光：倒影压暗并偏蓝，与渲染图里的深色水面一致
+water.material.fragmentShader = water.material.fragmentShader.replace(
+  'vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) );',
+  'vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) ) * vec3( 0.5, 0.6, 0.68 );')
+  // 远处波纹渐隐为平静镜面，避免法线贴图在掠射角下出现重复纹样
+  .replace('vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
+    'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );\n' +
+    'surfaceNormal = normalize( mix( surfaceNormal, vec3( 0.0, 1.0, 0.0 ), smoothstep( 60.0, 300.0, length( eye - worldPosition.xyz ) ) ) );');
+water.rotation.x = -Math.PI / 2;
+water.position.y = -0.02;
+scene.add(water);
+
+// glTF 坐标：x 东，y 上，-z 北（由 Blender 的 x, z, -y 换算）
+const VIEWS = {
+  eye:   { pos: [14, 2.6, 44],     tgt: [-4, 5.2, 0] },
+  air:   { pos: [30, 46, 38],      tgt: [-2, 1, 1] },
+  axis:  { pos: [-40.8, 2.2, 21.2], tgt: [0, 4.2, 0] },
+  court: { pos: [4.44, 2.15, -2.3], tgt: [-35.5, 2.6, 18.4] },
+  approach: { pos: [-118, 38, 140], tgt: [-24, 0, 28] },
+  arrival:  { pos: [-72.5, 2.47, 73.0], tgt: [-6, 5.0, 8.0] },
+  plan:  { pos: [4, 40, 26], tgt: [0, 0, -3] },
+};
+let tween = null;
+function go(name, instant) {
+  const v = VIEWS[name];
+  const p1 = new THREE.Vector3(...v.pos), t1 = new THREE.Vector3(...v.tgt);
+  document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === name));
+  if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    camera.position.copy(p1); controls.target.copy(t1); controls.update(); return;
+  }
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1, t1, t: 0 };
+}
+document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
+document.querySelectorAll('[data-tide]').forEach(b => b.addEventListener('click', () => {
+  water.position.y = Number(b.dataset.tide) - 0.02;
+  document.querySelectorAll('[data-tide]').forEach(x => x.setAttribute('aria-pressed', x === b));
+}));
+// 首层剖切：建筑在首层地面以上 1.4 m 处水平剖开（人物在 4 m 处剖开，只去掉屋面平台上的人），湖岸配景不剖
+const CUT_BUILDING = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.85 + 1.4);
+const CUT_PEOPLE = new THREE.Plane(new THREE.Vector3(0, -1, 0), 4.0);
+const cutBtn = document.getElementById('v-cut');
+let model = null;
+function setCut(on) {
+  cutBtn.setAttribute('aria-pressed', on);
+  if (!model) return;
+  model.traverse(o => {
+    if (!o.isMesh || o.userData.context) return;
+    o.material.clippingPlanes = on ? [o.userData.people ? CUT_PEOPLE : CUT_BUILDING] : null;
+    o.material.clipShadows = true;
+    o.material.needsUpdate = true;
+  });
+  if (on) go('plan');
+}
+cutBtn.addEventListener('click', () => setCut(cutBtn.getAttribute('aria-pressed') !== 'true'));
+const spinBtn = document.getElementById('v-spin');
+spinBtn.addEventListener('click', () => {
+  controls.autoRotate = !controls.autoRotate;
+  spinBtn.setAttribute('aria-pressed', controls.autoRotate);
+});
+controls.autoRotateSpeed = 0.6;
+go('eye', true);
+
+function resize() {
+  const w = box.clientWidth, h = box.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(box);
+resize();
+
+const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);
+// 模型以 base64 编码的 GLB 存放在 JSON 数据文件中
+async function loadModel() {
+  const res = await fetch('model/pavilion.json');
+  if (!res.ok) throw new Error(res.status);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const reader = res.body.getReader();
+  const chunks = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); got += value.length;
+    if (total) status.textContent = `正在载入模型… ${Math.round(got / total * 100)}%`;
+  }
+  const text = new TextDecoder().decode(await new Blob(chunks).arrayBuffer());
+  const bin = Uint8Array.from(atob(JSON.parse(text).data), c => c.charCodeAt(0));
+  return new Promise((ok, fail) => loader.parse(bin.buffer, '', ok, fail));
+}
+loadModel().then(gltf => {
+  gltf.scene.traverse(o => {
+    if (!o.isMesh) return;
+    // 湖岸与小岛（Shore_ / Islet）为配景，人物单独剖切；各自复制材质，剖切只作用于建筑
+    let n = o.name, p = o.parent;
+    while (p && !/^(Shore_|Islet|People_)/.test(n)) { n = p.name || n; p = p.parent; }
+    o.userData.context = /^(Shore_|Islet)/.test(n);
+    o.userData.people = /^People_/.test(n);
+    if (o.userData.context || o.userData.people) o.material = o.material.clone();
+    const m = o.material;
+    const transparent = m.transmission > 0 || m.opacity < 1;
+    if (transparent) {
+      // 玻璃：轻微反射、清楚看到室内层次
+      o.material = new THREE.MeshPhysicalMaterial({ color: 0xe8f2f2, metalness: 0, roughness: 0.04,
+        transparent: true, opacity: 0.16, envMapIntensity: 1.4, side: THREE.DoubleSide, depthWrite: false });
+      o.renderOrder = 2;
+    } else {
+      o.castShadow = true; o.receiveShadow = true;
+      if (m.emissiveIntensity !== undefined && m.emissive && m.emissive.getHex() !== 0) m.emissiveIntensity = 1.6;
+    }
+  });
+  scene.add(gltf.scene);
+  model = gltf.scene;
+  if (cutBtn.getAttribute('aria-pressed') === 'true') setCut(true);
+  status.remove();
+}).catch(() => { status.textContent = '模型载入失败，请刷新页面重试'; });
+
+// 视窗离开屏幕时暂停绘制（水面倒影要多画一遍场景）
+let onScreen = true;
+new IntersectionObserver(es => { onScreen = es[0].isIntersecting; }).observe(box);
+const clock = new THREE.Clock();
+function tick() {
+  const dt = clock.getDelta();
+  if (!onScreen && !document.fullscreenElement) { requestAnimationFrame(tick); return; }
+  water.material.uniforms.time.value += dt * 0.3;
+  if (tween) {
+    tween.t = Math.min(1, tween.t + dt / 1.4);
+    const k = tween.t < .5 ? 4 * tween.t ** 3 : 1 - (-2 * tween.t + 2) ** 3 / 2;
+    camera.position.lerpVectors(tween.p0, tween.p1, k);
+    controls.target.lerpVectors(tween.t0, tween.t1, k);
+    if (tween.t >= 1) tween = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>

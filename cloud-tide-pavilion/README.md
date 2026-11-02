@@ -109,6 +109,13 @@ cloud-tide-pavilion/
 │   ├── cloud_tide_pavilion_ar.usdz         同上，iPhone / iPad 的 AR Quick Look 用
 │   ├── cloud_tide_pavilion_ar_open.usdz    揭开到首层的版本（去掉第 2–4 层：屋顶、屋面平台、观景厅与平台上的人）
 │   └── cloud_tide_pavilion_ar.json         AR 网页导航数据：五个层次的视角、15 处标注点与人视点（含三段画墙）、点击识别用的分区轮廓
+├── web/                            展示网站与 AR 网页（见「网页」一节）
+│   ├── build.py                    构建 → web/dist/site、web/dist/ar：复制与加工图片、压缩模型，AR 页填入导航数据、二维码、提交号与文件大小
+│   ├── site_model.mjs              展示网站模型预处理：去掉不用的 UV，逐个构件按 1 cm 误差简化（人物、金属柱与斜撑不动）
+│   ├── site/                       展示网站页面 index.html（页面片段，发布时补文档骨架）与水面法线贴图
+│   ├── ar/                         AR 网页模板 index.html 与封面图
+│   ├── tests/                      浏览器测试（Playwright）：点击、层次导航、点画、起飞平顺、版面、展示网站 3D 模型
+│   └── package.json                构建与测试工具，版本与网页引用的 CDN 版本一致
 ├── renders/                        各机位渲染图；分析图（区位、总平面、首层与平台平面、1-1 与 2-2 剖面、南立面、1:20 檐口节点、形体生成、环境策略、日照分析、爆炸轴测、潮位、支承与抗侧力）；结构轴测图；立面与爆炸轴测的线稿底图（*_raw.png）；日照计算结果 solar.json；种植位置 planting.json；七张展板 board_01–07.jpg
 └── src/
     ├── plan.py          全部几何定义：三片屋顶（含主梁高度）、围合体、潮池与水口、坡道、日落轴线、天窗、疏散楼梯间、服务用房、湖岸与栈桥、滨湖路与公园范围、滨湖城区布局（区位图与模型共用）
@@ -129,7 +136,7 @@ cloud-tide-pavilion/
     ├── exploded.py      爆炸轴测线稿底图：基座、首层、主屋顶与低檐、观景厅、次屋顶分层抬开，柱与环梁按高度归层
     ├── solar.py         日照分析：北纬 30° 冬至、春秋分、夏至，在模型上逐点向太阳做光线追踪，得到首层与潮池的日照时数与逐时被晒面积
     ├── boards.py        七张 A1 展板排版（概念、技术、平面与流线、结构、生成与环境、立面与构造、分层日照与材料）
-    ├── export_glb.py    导出 GLB（网页版由 gltf-transform 以 meshopt 压缩，保留构件名，便于网页中按构件剖切）
+    ├── export_glb.py    导出 GLB（网页版由 web/build.py 简化、压缩，保留构件名，便于网页中按构件剖切）
     └── export_ar.py     导出 1:100 AR 模型：圆形水面底座 + 胡桃木边框（名牌、指北针），栈桥在底座边缘截断并补剖切面；细部减面；玻璃半透明（USDZ 补写 opacity）；按爆炸轴测分五层（第 1–4 层材质名带 L1_–L4_ 前缀），另出一份揭开到首层的 USDZ；写出网页导航数据
 ```
 
@@ -157,10 +164,18 @@ AR 模型按 1:100 缩小：底座直径 56 cm、模型高约 14 cm，原点在�
 - 五个层次与爆炸轴测一致：基座·潮池·栈桥 / 首层 / 主屋顶·屋面平台 / 观景厅·月洞墙 / 次屋顶。第 1–4 层的材质名以 `L1_`…`L4_` 开头，网页据此逐层揭开、分层展开，并判断点到的是哪一层；再用 `_ar.json` 里的分区轮廓认出具体位置（门厅、展廊、潮池……）。iPhone AR 揭开到首层时切换到 `_open.usdz`。
 - 网页里点模型任意处，镜头飞到那一点；再点地面就以 1.6 m 人眼高度站在那里。15 处标注点各带一个视角，其中 11 处是人视点；三段画墙各有一个人视点，点到画或画框就走到那面墙前看。点偏一点（紧挨模型的空白处）会落到最近的模型上，离模型远的空白处会提示一下；透明玻璃不挡点击；人视点里点天空就原地转头看过去。
 
+## 网页
+
+展示网站（`web/site/`）与 AR 网页（`web/ar/`）都是单页。`web/build.py` 把渲染图、分析图与模型组装成 `web/dist/` 下可直接发布的静态文件，模型以 base64 JSON 承载（发布平台只收常见网页文件类型）。
+
+- 展示网站的 3D 模型由 `cloud_tide_pavilion.glb` 经 `web/site_model.mjs` 处理：去掉不用的 UV，逐个构件按 1 cm 误差简化，人物、金属柱与斜撑保持原样；下载约 7 MB、63 万面（原样压缩为 10 MB、127 万面）。七个预设视角截图对比无可见差别。统一按比例简化会更小，但跨度上百米的人物网格会被简化走样，全金属的斜撑截面少了棱，反射从天空变成湖面而发黑，所以没有采用。
+- AR 网页模型按 0.03% 网格尺寸的误差简化，约 2 MB、17.7 万面；页面上的文件大小与面数由构建时按实际文件填写。二维码与下载链接经 jsDelivr 指向最后一次修改 AR 文件的提交，AR 文件改动后先提交、推送，再构建发布。
+- `web/tests/` 的浏览器测试覆盖：点击（模型上、空白处、人视点里的天空、标注文字、玻璃、手机上带位移的轻点）、层次导航、点画、起飞平顺、两个页面在电脑与手机、浅色与深色下的版面、展示网站各预设视角。测试在本机起静态服务，把 CDN 脚本换成 `web/node_modules` 里的同版本文件。
+
 ## 重新生成
 
 ```bash
-python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib
+python -m venv venv && ./venv/bin/pip install bpy==5.2.2 shapely triangle scipy pillow matplotlib segno
 cd cloud-tide-pavilion
 ../venv/bin/python src/paintings.py assets/paintings   # 展廊六幅画（build.py 找不到这些文件时也会自动生成）
 PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_tide_pavilion.blend   # 同时导出种植位置给区位图
@@ -173,7 +188,9 @@ PLANTING_JSON=renders/planting.json ../venv/bin/python src/build.py model/cloud_
 ../venv/bin/python src/boards.py renders renders renders
 ../venv/bin/python src/export_glb.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion.glb
 ../venv/bin/python src/export_ar.py model/cloud_tide_pavilion.blend model/cloud_tide_pavilion_ar   # → _ar.glb、_ar.usdz、_ar_open.usdz、_ar.json
-npx @gltf-transform/cli@4.1.1 optimize model/cloud_tide_pavilion_ar.glb web_ar.glb --compress meshopt --texture-compress false --palette false --instance false --simplify true --simplify-ratio 0 --simplify-error 0.0003 --simplify-lock-border true   # AR 网页用：再简化到约 17.7 万面、2.0 MB（含六幅画的贴图），手机上转动更顺；AR 文件本身不简化
+(cd web && npm install)   # 构建与测试工具：gltf-transform、model-viewer、three、meshoptimizer
+../venv/bin/python web/build.py   # 展示网站与 AR 网页 → web/dist/site、web/dist/ar；AR 网页模型另行简化到约 17.7 万面，AR 文件本身不简化
+(cd web && npm test)   # 浏览器测试，软件渲染下约 15–20 分钟
 ```
 
 调整造型时修改 `src/plan.py`：三片屋顶的 `rin_keys` / `w_keys` / `h_keys` 控制点，`SOLSTICE_SUNSET_AZ`（换纬度即可重算轴线），`BASIN_STEPS` 与潮位，坡道参数。木梁、幕墙高度、柱高、栏杆、分析图都会随之更新；改完运行 `python src/structure.py` 看支承距离、初步校核与抗侧力是否仍在合理范围，运行 `python src/program.py` 看面积与疏散距离。

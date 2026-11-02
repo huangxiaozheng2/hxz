@@ -1,0 +1,1399 @@
+<title>云上潮汐馆 AR 模型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&family=Noto+Sans+SC:wght@400;500&display=swap">
+<script>
+/* 手机屏幕的像素密度常到 3：三维画面按 2 倍渲染就足够清晰，像素量少一半以上，转动和飞行更顺 */
+try { if ((window.devicePixelRatio || 1) > 2) Object.defineProperty(window, 'devicePixelRatio', { get: () => 2, configurable: true }); } catch (e) {}
+</script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.3.1/dist/model-viewer.min.js"></script>
+<style>
+/* 布局：展台 + 层次索引——模型立在聚光台面上，右侧是一列按标高叠起的“层”，像一张剖面；说明卡跟着点到的位置变化 */
+:root {
+  --paper: #f5f2ec;   /* 象牙白纸面 */
+  --ink: #2b2a27;     /* 正文 */
+  --muted: #736c65;   /* 次要文字 */
+  --rule: #ddd5ca;    /* 细线 */
+  --oak: #9a7149;     /* 木肋色，强调 */
+  --tide: #1f3a4d;    /* 潮汐深蓝 */
+  --card: #fbf9f5;
+  --stage: #e9e2d6;   /* 台面聚光 */
+  --slab: #cfc5b6;    /* 层次索引里的楼板条 */
+  --dot: #2b2a27;     /* 标注点 */
+  --dot-fg: #f5f2ec;
+  --shadow: rgba(43, 42, 39, .22);
+  --qr-bg: #ffffff;   /* 二维码始终深色模块、白底 */
+  --qr-fg: #1d2023;
+  --display: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141a1f; --ink: #ece6dc; --muted: #a39b91; --rule: #2e363d; --oak: #d2a678; --tide: #9cc1d8;
+    --card: #1a2128; --stage: #1f2930; --slab: #3a454e; --dot: #ece6dc; --dot-fg: #141a1f; --shadow: rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141a1f; --ink: #ece6dc; --muted: #a39b91; --rule: #2e363d; --oak: #d2a678; --tide: #9cc1d8;
+  --card: #1a2128; --stage: #1f2930; --slab: #3a454e; --dot: #ece6dc; --dot-fg: #141a1f; --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.75; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
+a { color: var(--tide); text-underline-offset: 3px; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--oak); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* 抬头：像展签 */
+header.label { padding-block: clamp(28px, 6vw, 52px) 14px; display: grid; gap: 6px; }
+.eyebrow { margin: 0; color: var(--oak); font-size: 12.5px; letter-spacing: .28em; font-variant-numeric: tabular-nums; }
+header.label h1 { font-size: clamp(32px, 6vw, 52px); font-weight: 400; letter-spacing: .3em; }
+.lede { margin: 4px 0 0; color: var(--muted); max-width: 40em; }
+
+/* 台面 */
+.stage { background: radial-gradient(ellipse 62% 60% at 40% 55%, var(--stage), var(--paper) 72%); }
+.stage-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 8px 28px; align-items: start; padding-block: 4px 20px; }
+.viewer-col { min-width: 0; }
+
+/* 位置路径 */
+.crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-height: 36px; font-size: 14px; }
+.crumbs li { display: inline-flex; align-items: center; color: var(--muted); }
+.crumbs li + li::before { content: "›"; margin: 0 6px 0 4px; color: var(--muted); }
+.crumbs button { background: none; border: 0; border-radius: 4px; padding: 3px 6px; color: var(--tide); cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 4px; }
+.crumbs button:hover { background: var(--card); text-decoration-color: currentColor; }
+.crumbs [aria-current] { color: var(--ink); font-weight: 500; padding: 3px 6px; }
+.crumbs li:last-child { animation: crumb-in .45s ease both; }
+@keyframes crumb-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+
+model-viewer {
+  display: block; width: 100%; height: clamp(400px, 68vh, 720px); max-width: 100%;
+  background-color: transparent; --poster-color: transparent; --progress-bar-color: transparent;
+}
+model-viewer::part(default-ar-button) { display: none; }
+.progress { position: absolute; left: 12%; right: 12%; top: 50%; height: 2px; background: var(--rule); border-radius: 2px; overflow: hidden; }
+.progress span { display: block; height: 100%; width: 100%; background: var(--oak); transform-origin: left; transform: scaleX(0); transition: transform .2s; }
+.progress.done { display: none; }
+.ar-btn {
+  position: absolute; right: 12px; bottom: 14px; display: inline-flex; align-items: center; gap: 8px;
+  background: var(--tide); color: var(--paper); border: 0; border-radius: 999px; padding: 10px 18px;
+  font-weight: 500; letter-spacing: .06em; cursor: pointer; box-shadow: 0 2px 10px var(--shadow);
+}
+.ar-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.hint {
+  position: absolute; left: 12px; top: 12px; margin: 0; max-width: calc(100% - 24px); pointer-events: none;
+  background: var(--card); color: var(--muted); border: 1px solid var(--rule); border-radius: 999px;
+  padding: 3px 12px; font-size: 12.5px; letter-spacing: .04em; box-shadow: 0 1px 6px var(--shadow);
+  transition: opacity .25s ease;
+}
+.hint.swapping { opacity: 0; }
+
+/* 标注点 */
+.hotspot {
+  position: relative; width: 26px; height: 26px; padding: 0; border-radius: 50%;
+  border: 1.5px solid var(--dot-fg); background: var(--dot); color: var(--dot-fg);
+  font: 600 12px/1 var(--body); font-variant-numeric: tabular-nums; display: grid; place-items: center;
+  cursor: pointer; box-shadow: 0 1px 5px var(--shadow);
+  transition: opacity .45s ease, transform .55s cubic-bezier(.2, .8, .2, 1), background .3s ease;
+}
+.hotspot.off { opacity: 0; transform: scale(.4); pointer-events: none; }
+.hotspot .tag {
+  position: absolute; left: calc(100% + 6px); top: 50%; transform: translateY(-50%); white-space: nowrap;
+  background: var(--card); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 3px 8px; font-weight: 500; font-size: 12px; letter-spacing: .04em; cursor: pointer;
+}
+.hotspot.off .tag { pointer-events: none; }
+.hotspot.tag-left .tag { left: auto; right: calc(100% + 6px); }
+.hotspot.tag-hide .tag { visibility: hidden; }
+@media (pointer: coarse) { .hotspot::before { content: ""; position: absolute; inset: -9px; border-radius: 50%; } }   /* 手指好点：触屏上命中范围比圆点大一圈 */
+.tap-ring {                                         /* 点下去的地方泛一圈涟漪：这一下收到了 */
+  position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%;
+  border: 2px solid var(--oak); pointer-events: none; animation: tapring .6s ease-out forwards;
+}
+.tap-ring.miss { border-color: var(--muted); border-style: dashed; }
+@keyframes tapring { from { transform: scale(.3); opacity: .95; } to { transform: scale(1.3); opacity: 0; } }
+.hotspot.on { background: var(--oak); border-color: var(--card); }
+model-viewer.no-labels .hotspot { visibility: hidden; }
+
+/* 工具条 */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-block: 8px 0; }
+.toolbar button {
+  font-size: 13.5px; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 999px;
+  padding: 7px 16px; cursor: pointer; letter-spacing: .04em;
+  transition: background .3s ease, color .3s ease, border-color .3s ease;
+}
+.toolbar button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.toolbar button:disabled { opacity: .45; cursor: default; }
+.toolbar .ar-state { flex: 1 1 240px; min-width: 0; color: var(--muted); font-size: 13px; text-align: right; }
+
+/* 右侧：说明卡 + 层次索引 */
+.side { display: flex; flex-direction: column; gap: 18px; padding-top: 44px; min-width: 0; }
+.place { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px 16px; }
+.place-body { display: grid; gap: 6px; transition: opacity .26s ease, transform .3s ease; }
+.place-body.swapping { opacity: 0; transform: translateY(6px); }
+.place-kicker { margin: 0; font-size: 12px; letter-spacing: .2em; color: var(--oak); font-variant-numeric: tabular-nums; }
+.place h3 { font-size: 21px; letter-spacing: .08em; }
+.place .desc { margin: 0; font-size: 14px; line-height: 1.7; }
+.place-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.place-actions:empty { display: none; }
+.place-actions button {
+  font-size: 13px; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 999px;
+  padding: 6px 14px; cursor: pointer; transition: background .3s ease, border-color .3s ease, color .3s ease;
+}
+.place-actions button:hover { border-color: var(--oak); }
+.place-actions button.primary { background: var(--tide); border-color: var(--tide); color: var(--paper); }
+
+.index-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin-bottom: 6px; }
+.index-head h2 { font-size: 17px; letter-spacing: .2em; }
+.index-head span { font-size: 12px; color: var(--muted); }
+.layers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; transition: gap .6s ease; }
+.layers.exploded { gap: 14px; }
+.layer-btn {
+  width: 100%; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 0;
+  align-items: baseline; text-align: left; background: none; border: 0; border-radius: 6px; padding: 7px 8px 8px; cursor: pointer;
+  transition: background .35s ease, box-shadow .35s ease;
+}
+.layer-btn:hover { background: var(--card); }
+.lv-no { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.lv-name { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: .05em; min-width: 0; transition: color .35s ease; }
+.lv-elev { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lv-bar { grid-column: 2 / 4; justify-self: center; height: 5px; width: calc(var(--w) * 100%); margin-top: 6px; border-radius: 1px; background: var(--slab); transition: background .45s ease, box-shadow .45s ease, opacity .45s ease; }
+.layer.is-active .layer-btn { background: var(--card); box-shadow: inset 0 0 0 1px var(--rule); }
+.layer.is-active .lv-bar { background: var(--oak); }
+.layer.is-active .lv-name { color: var(--oak); }
+.layer.is-peeled .lv-name { color: var(--muted); font-weight: 400; }
+.layer.is-peeled .lv-bar { background: transparent; box-shadow: inset 0 0 0 1px var(--muted); opacity: .6; }
+.peeled-tag { display: none; font-size: 11.5px; color: var(--muted); margin-left: 6px; font-family: var(--body); font-weight: 400; letter-spacing: .04em; }
+.layer.is-peeled .peeled-tag { display: inline; }
+.sub-wrap { display: grid; grid-template-rows: 0fr; opacity: 0; overflow: hidden; transition: grid-template-rows .45s ease, opacity .35s ease; }
+.layer.is-active .sub-wrap { grid-template-rows: 1fr; opacity: 1; }
+.sub { list-style: none; margin: 0 0 0 38px; padding: 0; display: grid; gap: 1px; min-height: 0; overflow: hidden; }
+.sub li:first-child { margin-top: 2px; }
+.sub li:last-child { margin-bottom: 8px; }
+.sub button {
+  width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; background: none; border: 0;
+  border-radius: 4px; padding: 4px 6px; cursor: pointer; font-size: 13.5px; color: var(--ink);
+  transition: background .3s ease, color .3s ease;
+}
+.sub button:hover { background: var(--card); }
+.sub .n { width: 19px; height: 19px; flex: none; border-radius: 50%; border: 1px solid var(--ink); display: grid; place-items: center; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sub .eye { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+.sub button[aria-current="true"] { color: var(--oak); }
+.sub button[aria-current="true"] .n { background: var(--oak); border-color: var(--oak); color: var(--card); }
+
+/* 分节 */
+section.block { padding-block: clamp(28px, 5vw, 48px) 0; }
+.sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; border-bottom: 1px solid var(--rule); padding-bottom: 10px; margin-bottom: 18px; }
+.sec-head h2 { font-size: 22px; letter-spacing: .12em; }
+.sec-head p { margin: 0; color: var(--muted); font-size: 13px; }
+.howto { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 28px; }
+.howto li { border-top: 2px solid var(--ink); padding-top: 10px; display: grid; gap: 4px; align-content: start; }
+.howto b { font-family: var(--display); font-size: 16px; letter-spacing: .08em; }
+.howto span { color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+
+/* 手机上打开 */
+.devices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.device { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 20px 22px 22px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.device h3 { font-size: 18px; letter-spacing: .1em; }
+.device .req { margin: -6px 0 0; color: var(--muted); font-size: 13px; }
+.device ol { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+.device .row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.device .row ol { flex: 1 1 220px; min-width: 0; }
+.qr { margin: 0; flex: 0 0 auto; display: grid; gap: 6px; justify-items: center; }
+.qr .code { background: var(--qr-bg); padding: 8px; border-radius: 4px; border: 1px solid var(--rule); width: 148px; max-width: 100%; }
+.qr svg { display: block; width: 100%; height: auto; }
+.qr svg path { stroke: var(--qr-fg); }
+.qr figcaption { color: var(--muted); font-size: 12px; }
+.files { display: flex; flex-wrap: wrap; gap: 8px; }
+.files a {
+  display: inline-flex; align-items: baseline; gap: 6px; text-decoration: none; color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; font-size: 13.5px; background: var(--paper);
+}
+.files a small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.files a:hover { border-color: var(--oak); }
+.fine { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.fine a { color: inherit; }
+.note { margin: 16px 0 0; color: var(--muted); font-size: 13.5px; max-width: 52em; }
+
+/* 模型参数 */
+.facts { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin: 0; border-top: 1px solid var(--rule); }
+.facts div { padding: 14px 16px 14px 0; border-bottom: 1px solid var(--rule); }
+.facts dt { color: var(--muted); font-size: 12.5px; letter-spacing: .14em; }
+.facts dd { margin: 2px 0 0; font-family: var(--display); font-size: 20px; font-variant-numeric: tabular-nums; }
+.facts dd small { font-family: var(--body); font-size: 12.5px; color: var(--muted); margin-left: 4px; }
+footer { padding-block: 28px 40px; color: var(--muted); font-size: 12.5px; }
+
+@media (max-width: 960px) {
+  .stage-grid { grid-template-columns: minmax(0, 1fr); }
+  .side { padding-top: 0; }
+  .side .place { order: -1; }
+  .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .devices, .howto { grid-template-columns: minmax(0, 1fr); }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .toolbar .ar-state { text-align: left; flex-basis: 100%; }
+  .hotspot { width: 24px; height: 24px; font-size: 11px; }
+  .hotspot .tag { display: none; }
+  .hint { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress span, .layers, .lv-bar, .lv-name, .layer-btn, .sub-wrap, .hotspot, .place-body, .hint { transition: none; }
+  .crumbs li:last-child { animation: none; }
+  .tap-ring { display: none; }
+}
+</style>
+
+<header class="label wrap">
+  <p class="eyebrow">1 : 100 桌面模型 · 增强现实</p>
+  <h1>云上潮汐馆</h1>
+  <p class="lede">点模型上的任何地方，镜头就顺着一道弧线滑过去；再点一下地面，就走到那里看。在「层次」里从次屋顶一层层往下揭开，直到潮池和栈桥。</p>
+</header>
+
+<div class="stage">
+  <div class="wrap stage-grid">
+    <div class="viewer-col">
+      <nav class="crumbs" aria-label="所在位置"><ol id="crumbs"></ol></nav>
+      <model-viewer id="mv" alt="云上潮汐馆 1:100 模型，圆形水面底座" poster="img/poster.webp"
+        ar ar-modes="webxr quick-look" ar-scale="auto" ar-placement="floor" xr-environment
+        camera-controls disable-tap touch-action="pan-y" interaction-prompt="none" interpolation-decay="110"
+        camera-orbit="-28deg 62deg auto" min-camera-orbit="auto 8deg 0.002m" max-camera-orbit="auto 86deg auto"
+        min-field-of-view="10deg" max-field-of-view="70deg"
+        auto-rotate auto-rotate-delay="6000" rotation-per-second="5deg"
+        environment-image="neutral" shadow-intensity="1" shadow-softness="0.9" exposure="1.02">
+        <button slot="ar-button" class="ar-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>
+          在 AR 中查看
+        </button>
+        <div slot="progress-bar" class="progress" id="progress"><span></span></div>
+        <p class="hint" id="hint">点模型任意处，镜头滑过去</p>
+      </model-viewer>
+      <div class="toolbar">
+        <button type="button" id="explode" aria-pressed="false">分层展开</button>
+        <button type="button" id="labels" aria-pressed="true">显示标注</button>
+        <button type="button" id="home">回到全景</button>
+        <span class="ar-state" id="arState" aria-live="polite">正在载入模型（__AR_WEB_MB__ MB）…</span>
+      </div>
+    </div>
+
+    <aside class="side" aria-label="层次与说明">
+      <div class="place" id="place" aria-live="polite">
+        <div class="place-body" id="placeBody">
+          <p class="place-kicker" id="placeKicker">全景</p>
+          <h3 id="placeName">云上潮汐馆</h3>
+          <p class="desc" id="placeDesc">浮在湖面上的展馆：三片新月形屋顶层层错落，中间是与湖相通的潮池庭院。</p>
+          <div class="place-actions" id="placeActions"></div>
+        </div>
+      </div>
+      <nav aria-labelledby="h-layers">
+        <div class="index-head"><h2 id="h-layers">层次</h2><span>由上往下，点哪层进哪层</span></div>
+        <ol class="layers" id="layers"></ol>
+      </nav>
+    </aside>
+  </div>
+</div>
+
+<main class="wrap">
+  <section class="block" aria-labelledby="h-how">
+    <div class="sec-head"><h2 id="h-how">怎么逛</h2><p>三个层级：全景 › 某一层 › 某个位置，最后可以站进去</p></div>
+    <ol class="howto">
+      <li><b>点哪里，去哪里</b><span>在模型上点一下，镜头顺着一道弧线缓缓滑到那一点，起步和停下都是渐变的；说明卡告诉你那是哪里。点偏一点也没关系，会落到最近的地方；玻璃是透明的，点到的是玻璃后面看得见的东西。飞行中一拖动就交还给你。</span></li>
+      <li><b>一层层揭开</b><span>在「层次」里选一层，它上面的各层会轻轻浮起、淡去；也可以按「分层展开」，把五层像爆炸图一样依次抬开。</span></li>
+      <li><b>站进去看</b><span>滑到某处后，再点一下地面，或者点「站到这里看」，就以 1.6 m 的人眼高度站在那里；拖动画面或点天空就转头，点地面就走过去。</span></li>
+    </ol>
+  </section>
+
+  <section class="block" aria-labelledby="h-phone">
+    <div class="sec-head"><h2 id="h-phone">放到桌面上</h2><p>手机对准一张空桌面，模型按 1:100 落在上面，可以缩放、旋转</p></div>
+    <div class="devices">
+      <article class="device">
+        <h3>iPhone · iPad</h3>
+        <div class="row">
+          <figure class="qr">
+            <div class="code"><!--QR--></div>
+            <figcaption>相机扫码，直接进入 AR</figcaption>
+          </figure>
+          <ol>
+            <li>用相机扫左边的二维码，或在 Safari 里点下面的文件链接。</li>
+            <li>点「AR」，把手机对着桌面慢慢移动，模型会落在桌上。</li>
+            <li>双指缩放、旋转；单指拖动可以挪位置。</li>
+          </ol>
+        </div>
+        <div class="files">
+          <a id="lnkFull" href="#" target="_blank" rel="noopener">USDZ · 完整 <small>__USDZ_MB__ MB</small></a>
+          <a id="lnkOpen" href="#" target="_blank" rel="noopener">USDZ · 揭开到首层 <small>__USDZ_OPEN_MB__ MB</small></a>
+        </div>
+        <p class="fine">在 Safari 里打开本页时，也可以直接点模型右下角的「在 AR 中查看」：当前揭开到首层或基座时，进入的是揭开版本。备用地址：<a id="rawFull" href="#" target="_blank" rel="noopener">完整</a> · <a id="rawOpen" href="#" target="_blank" rel="noopener">揭开到首层</a>（GitHub 原文件，下载后在「文件」里点开）。</p>
+      </article>
+      <article class="device">
+        <h3>安卓手机</h3>
+        <p class="req">需要 Chrome 浏览器和 Google Play 的 AR 服务（ARCore）</p>
+        <ol>
+          <li>在手机的 Chrome 里打开本页。模型右下角出现「在 AR 中查看」时，点它即可；揭开和分层展开的状态会一起带进 AR。</li>
+          <li>按钮没有出现，说明当前页面不允许启动 AR：改用下面的 GLB 文件，在 Scene Viewer 或其他支持 AR 的 3D 查看应用里打开。</li>
+        </ol>
+        <div class="files">
+          <a id="lnkGlb" href="#" target="_blank" rel="noopener">GLB 模型 <small>__AR_GLB_MB__ MB</small></a>
+          <a id="lnkScene" href="#" target="_blank" rel="noopener">用 Scene Viewer 打开</a>
+        </div>
+        <p class="fine">「用 Scene Viewer 打开」会唤起 Google 的 AR 查看器，部分浏览器或应用内页面里点了可能没有反应。备用地址：<a id="rawGlb" href="#" target="_blank" rel="noopener">GLB 原文件</a>。</p>
+      </article>
+    </div>
+    <p class="note">二维码和链接指向 GitHub 仓库里公开的模型文件（经 jsDelivr 分发）。如果网络打不开这些地址，把 USDZ 或 GLB 文件直接传到手机上同样可以：iPhone 在「文件」里点开 USDZ 就能进入 AR。</p>
+  </section>
+
+  <section class="block" aria-labelledby="h-facts">
+    <div class="sec-head"><h2 id="h-facts">模型参数</h2><p>细部在 1:100 下看不出的构件已减面：人物、栏杆、檐下木肋、竖梃</p></div>
+    <dl class="facts">
+      <div><dt>比例</dt><dd>1 : 100</dd></div>
+      <div><dt>底座直径</dt><dd>56<small>cm</small></dd></div>
+      <div><dt>模型高度</dt><dd>约 14<small>cm</small></dd></div>
+      <div><dt>分层展开后</dt><dd>约 45<small>cm</small></dd></div>
+      <div><dt>三角面</dt><dd>36.6<small>万</small></dd></div>
+      <div><dt>网页模型</dt><dd>__AR_WEB_MB__<small>MB · __AR_WEB_WAN__ 万面</small></dd></div>
+    </dl>
+  </section>
+</main>
+
+<footer class="wrap">由 Blender 程序化模型导出（src/export_ar.py）。五个层次与展板上的爆炸轴测一致；栈桥在底座边缘截断，深色面为剖切面；底座边框上刻有名牌与指北针。</footer>
+
+<script type="module">
+const NAV = /*NAV*/null;
+const SHA = '__SHA__';
+const BASE = `https://cdn.jsdelivr.net/gh/huangxiaozheng2/hxz@${SHA}/cloud-tide-pavilion/model/`;
+const RAW = `https://raw.githubusercontent.com/huangxiaozheng2/hxz/${SHA}/cloud-tide-pavilion/model/`;
+const USDZ_FULL = BASE + 'cloud_tide_pavilion_ar.usdz';
+const USDZ_OPEN = BASE + 'cloud_tide_pavilion_ar_open.usdz';
+const GLB = BASE + 'cloud_tide_pavilion_ar.glb';
+const SCENE = 'intent://arvr.google.com/scene-viewer/1.2?mode=ar_preferred&title=' + encodeURIComponent('云上潮汐馆 1:100') +
+  '&file=' + encodeURIComponent(GLB) +
+  '#Intent;scheme=https;package=com.google.android.googlequicksearchbox;action=android.intent.action.VIEW;S.browser_fallback_url=' +
+  encodeURIComponent(GLB) + ';end;';
+const $ = id => document.getElementById(id);
+$('lnkFull').href = USDZ_FULL; $('lnkOpen').href = USDZ_OPEN; $('lnkGlb').href = GLB; $('lnkScene').href = SCENE;
+$('rawFull').href = RAW + 'cloud_tide_pavilion_ar.usdz'; $('rawOpen').href = RAW + 'cloud_tide_pavilion_ar_open.usdz';
+$('rawGlb').href = RAW + 'cloud_tide_pavilion_ar.glb';
+
+const S = NAV.scale, BT = NAV.base_t;
+
+// 五个层次（自下而上，与爆炸轴测一致）；w 是索引里楼板条的相对宽度（各层平面外廓）
+const LAYERS = [
+  { name: '基座 · 潮池 · 栈桥', short: '基座', elev: '±0.00', tag: '高潮位', w: 1.0,
+    d: '石材基座浮在湖面上，中间是与湖相通的潮池；栈桥和水口都朝西南伸出。揭到这一层，能看清平台和潮池的平面。' },
+  { name: '首层', short: '首层', elev: '+0.85', tag: '地面', w: 0.84,
+    d: '展廊、门厅和卫生间围着潮池庭院，环形坡道从庭院盘旋而上；西南角是 Y 形斜柱。' },
+  { name: '主屋顶 · 屋面平台', short: '屋面平台', elev: '+6.30', tag: '平台', w: 0.96,
+    d: '新月形的主屋顶 A 罩住展廊，南侧低檐 C 罩住门厅；主屋顶上是可以停留的屋面平台。' },
+  { name: '观景厅 · 月洞墙', short: '观景厅', elev: '+6.30', tag: '楼面', w: 0.4,
+    d: '屋面平台北侧的玻璃观景厅，西端的月洞墙对准冬至日落。' },
+  { name: '次屋顶 B', short: '次屋顶', elev: '+12.2', tag: '屋脊', w: 0.68,
+    d: '罩在观景厅上方的次屋顶，是整座建筑最高的一片。' },
+];
+
+// 标注点（几何在 NAV.spots 里）
+const SPOT_TEXT = {
+  bridge: ['栈桥', 'S 形栈桥从西南湖岸接到门厅。模型在底座边缘把它截断，深色面是剖切面。'],
+  pool: ['潮池', '与湖水相通的圆形潮池，潮差 0.95 m，池边台阶随潮位露出或没入；池中有树岛和磨砂玻璃雕塑。'],
+  channel: ['水口', '潮池经水口通向湖面，方向对准冬至日落 242.6°。站在水口外端往里看，正是冬至傍晚阳光照进潮池的方向。'],
+  lobby: ['门厅', '南侧的玻璃门厅，朝北正对潮池庭院。冬至正午，约四成地面晒得到太阳。'],
+  gallery: ['展廊', '北侧的弧形展廊，主屋顶上的光缝把天光引进室内。三段展墙上挂着六幅画，点画框可以走到画前。'],
+  artE: ['东段画墙', '左边是《冬至落日》（油彩：太阳贴着湖面落下），右边是《湖山清远》（水墨：远山四重、松林、一叶小舟）。'],
+  artS: ['中段画墙', '疏散楼梯间朝庭院的墙面。左边是《潮痕》（丙烯：潮位留在石头上的色带），右边是《月洞》（矿物色：青绿底上一轮圆洞，洞里是落日）。'],
+  artW: ['西段画墙', '左边是《芦汀白鹭》（水墨淡彩：秋芦、白鹭、淡月），右边是《夜湖灯影》（油彩：月夜湖面，对岸城灯与塔影）。'],
+  ramp: ['环形坡道', '绕庭院盘旋上升的 1:12 无障碍坡道，一直通到屋面平台。'],
+  ystrut: ['Y 形斜柱', '主屋顶西翼尖下的钢斜柱，立在水中的石墩上。'],
+  deck: ['屋面平台', '主屋顶上的平台，摆着沙发，可以越过庭院看湖。'],
+  skylight: ['屋面光缝', '主屋顶上的光缝共八段，正下方是展廊。'],
+  moon: ['月洞墙', '圆洞对准冬至日落方位 242.6°，冬至傍晚夕阳穿过洞口落进观景厅。'],
+  belvedere: ['观景厅', '屋面平台北侧的玻璃厅，次屋顶从上方罩住它。'],
+  roofB: ['次屋顶', '由电梯筒、月洞墙和立在主屋顶上的二层柱承托，屋脊 +12.2。'],
+};
+// 点击识别出的一般分区：[所属层（null 表示不改变当前层次）, 名称, 说明]
+const ZONE_TEXT = {
+  lake: [null, '湖面', '底座上的水面代表湖。实际场地里，平台四周都是开阔水面，栈桥向西南接到湖岸公园。'],
+  rim: [null, '底座边框', '胡桃木边框，刻有名牌和指北针。模型按 1:100 缩小，底座直径 56 cm。'],
+  plinth: [0, '临水平台', '首层平台高出设计高潮位 0.85 m，临水一侧是 1.05 m 高的玻璃栏板。'],
+  tree: [0, '树岛', '潮池里的树岛，略偏离圆心，位于日落轴线北侧。'],
+  ground: [1, '首层', LAYERS[1].d],
+  service: [1, '卫生间与储藏', '展廊东端的卫生间（含无障碍卫生间）、储藏和设备检修口。'],
+  core: [1, '电梯筒', '电梯筒从首层通到次屋顶，同时承托次屋顶。'],
+  egress: [1, '疏散楼梯', '从屋面平台直通首层的第二部疏散楼梯。'],
+  stair: [1, '螺旋楼梯', '展廊西端的螺旋楼梯，通到一个由吊杆悬挂的圆形平台。'],
+  roofA: [2, '主屋顶 A', '最大的一片新月形屋顶，罩住展廊，上面是屋面平台。'],
+  roofC: [2, '低檐 C', '南侧压低的一片屋檐，罩住门厅，东翼尖轻落在水中的石墩上。'],
+};
+const WALK = new Set(['plinth', 'bridge', 'lobby', 'gallery', 'ramp', 'ground', 'service', 'deck', 'belvedere', 'moon']);
+const spotKeys = k => Object.keys(NAV.spots).filter(s => NAV.spots[s].layer === k);
+const homeOf = z => NAV.spots[z] ? NAV.spots[z].layer : (ZONE_TEXT[z] ? ZONE_TEXT[z][0] : null);
+const textOf = z => SPOT_TEXT[z] || (ZONE_TEXT[z] ? ZONE_TEXT[z].slice(1) : [z, '']);
+const layerOfName = n => (n && /^L[1-4]_/.test(n)) ? Number(n[1]) : 0;
+const ART_WALL = ['artE', 'artE', 'artS', 'artS', 'artW', 'artW'];  // 画 0–5 挂在哪一段展墙
+function artOf(n, X, Y) {                              // 点到画面或画框 → 那段画墙的标注点
+  const m = /^M_Art_(\d)/.exec(n);
+  if (m) return NAV.spots[ART_WALL[+m[1]]] ? ART_WALL[+m[1]] : null;
+  if (!n.startsWith('M_ArtFrame')) return null;
+  let best = null, bd = 2.5;                           // 画框：取 2.5 m 内最近的一段
+  for (const key of new Set(ART_WALL)) {
+    const sp = NAV.spots[key];
+    if (!sp) continue;
+    const d = Math.hypot(sp.pos[0] / S - X, -sp.pos[2] / S - Y);
+    if (d < bd) { bd = d; best = key; }
+  }
+  return best;
+}
+
+const mv = $('mv');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (reduceMotion) mv.autoRotate = false;
+mv.iosSrc = USDZ_FULL;
+
+// ---------- 状态：全景(0) › 层(1) › 位置(2) › 人视点(3)
+const state = { level: 0, layer: null, zone: null, point: null, floor: null, explode: false };
+const cur = [0, 0, 0, 0, 0];             // 各层当前抬起的高度（分层展开）
+const alpha = [1, 1, 1, 1, 1];           // 各层当前不透明度（逐层揭开）
+let intern = null;                       // model-viewer 内部场景（用来逐层淡出、抬起）
+let HOME = null;                         // 载入后的默认取景
+
+// ---------- 小工具
+const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const add = (a, b) => a.map((x, i) => x + b[i]);
+const sub = (a, b) => a.map((x, i) => x - b[i]);
+const mul = (a, s) => a.map(x => x * s);
+const len = a => Math.hypot(...a);
+const lerp = (a, b, t) => a.map((x, i) => x + (b[i] - x) * t);
+const sph = (th, ph, r) => [r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph), r * Math.sin(ph) * Math.cos(th)];
+const smooth = t => t * t * t * (t * (t * 6 - 15) + 10);       // 起步和收尾的速度、加速度都为零
+function inPoly(name, x, y) {
+  for (const ring of NAV.zones[name] || []) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+function distPoly(name, x, y) {
+  if (inPoly(name, x, y)) return 0;
+  let best = Infinity;
+  for (const ring of NAV.zones[name] || []) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [ax, ay] = ring[j], [bx, by] = ring[i];
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2));
+      best = Math.min(best, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+    }
+  }
+  return best;
+}
+const inCircle = (name, x, y) => { const c = NAV.circles[name]; return Math.hypot(x - c[0], y - c[1]) < c[2]; };
+
+// ---------- 点到的是哪里：材质名给出层，平面位置给出分区
+function classify(p, matName) {
+  const n = matName || '';
+  const k = layerOfName(n);
+  const X = p.x / S, Y = -p.z / S, H = (p.y - cur[k]) / S - BT;
+  if (n.startsWith('AR_Water')) return 'lake';
+  if (n.startsWith('AR_BaseWalnut') || n.startsWith('AR_Brass')) return 'rim';
+  if (n.startsWith('AR_Section')) return 'bridge';
+  const art = artOf(n, X, Y);
+  if (art) return art;
+  if (k === 4) return 'roofB';
+  if (k === 3) return inPoly('moon', X, Y) ? 'moon' : 'belvedere';
+  if (k === 2) {
+    if (inPoly('moon', X, Y)) return 'moon';
+    if (inPoly('E3', X, Y) && H < 7.0) return 'belvedere';
+    if (inPoly('deck', X, Y) && Math.abs(H - NAV.deck) < 0.7) return 'deck';
+    if (inPoly('skylight', X, Y)) return 'skylight';
+    if (inPoly('roofA', X, Y)) return 'roofA';
+    return inPoly('roofC', X, Y) ? 'roofC' : 'roofA';
+  }
+  if (k === 1) {
+    if (inPoly('ystrut', X, Y)) return 'ystrut';
+    if (inCircle('core', X, Y)) return 'core';
+    if (inPoly('egress', X, Y)) return 'egress';
+    if (inCircle('stair', X, Y)) return 'stair';
+    if (Math.abs(Math.hypot(X, Y) - NAV.ramp[0]) < NAV.ramp[1] / 2 + 0.45) return 'ramp';
+    if (inPoly('service', X, Y)) return 'service';
+    const d2 = distPoly('E2', X, Y), d1 = distPoly('E1', X, Y);
+    if (Math.min(d1, d2) < 1.2) return d2 <= d1 ? 'lobby' : 'gallery';
+    return 'ground';
+  }
+  if (inCircle('tree', X, Y)) return 'tree';
+  if (inPoly('basin', X, Y)) return 'pool';
+  if (inPoly('channel', X, Y)) return 'channel';
+  if (inPoly('bridge', X, Y)) return 'bridge';
+  if (inPoly('service', X, Y)) return 'service';
+  if (inPoly('E2', X, Y)) return 'lobby';
+  if (inPoly('E1', X, Y)) return 'gallery';
+  return 'plinth';
+}
+
+// ---------- 逐帧驱动：镜头飞行和各层动画都挂进 model-viewer 自己的逐帧更新，和渲染同一拍，不会错帧
+let ctl = null;                                        // { controls, scene }：model-viewer 内部的相机控制与场景
+function symOf(desc) {
+  for (let o = mv; o; o = Object.getPrototypeOf(o)) {
+    const s = Object.getOwnPropertySymbols(o).find(x => x.description === desc);
+    if (s) return s;
+  }
+  return null;
+}
+function hookFrames() {
+  try {
+    const cs = symOf('controls'), ss = symOf('scene'), ts = symOf('tick');
+    const controls = cs && mv[cs], scene = ss && mv[ss], orig = ts && mv[ts];
+    const ok = controls && scene && typeof orig === 'function' &&
+      ['setOrbit', 'jumpToGoal', 'getCameraSpherical', 'applyOptions', 'setFieldOfView'].every(f => typeof controls[f] === 'function') &&
+      ['setTarget', 'jumpToGoal', 'getDynamicTarget', 'adjustedFoV', 'queueRender'].every(f => typeof scene[f] === 'function');
+    if (!ok) return null;
+    mv[ts] = function (time, delta) {
+      try { frame(time); } catch (e) { console.error(e); }
+      return orig.call(this, time, delta);
+    };
+    return { controls, scene };
+  } catch (e) { return null; }
+}
+function frame(now) {
+  if (flight && flight.step) flight.step(now);
+  if (tweens.size) stepTweens(now);
+}
+// 补间：同一个键的新补间接替旧的，从当前值出发，所以随时打断也不会跳
+const tweens = new Map();
+let ticking = false;
+function tween(key, dur, fn, delay = 0) {
+  tweens.set(key, { t0: performance.now() + delay, dur: reduceMotion ? 0 : dur, fn });
+  if (ctl) ctl.scene.queueRender();
+  else if (!ticking) { ticking = true; requestAnimationFrame(rafTick); }   // 拿不到内部钩子时自己跑
+}
+function stepTweens(now) {
+  for (const [key, tw] of [...tweens]) {
+    if (now < tw.t0) continue;
+    const u = tw.dur ? Math.min(1, (now - tw.t0) / tw.dur) : 1;
+    tw.fn(smooth(u));
+    if (u >= 1) tweens.delete(key);
+  }
+  if (intern) intern.scene.queueRender();
+}
+function rafTick(now) { stepTweens(now); if (tweens.size) requestAnimationFrame(rafTick); else ticking = false; }
+
+// ---------- 层：淡出时轻轻上浮（像把屋顶揭起来），淡入时落回原位；分层展开时整层抬起
+const LIFT = 0.035;
+function grabInternals() {
+  try {
+    const sym = Object.getOwnPropertySymbols(mv).find(s => s.description === 'scene');
+    const scene = sym ? mv[sym] : null;
+    const root = scene && scene.models ? scene.models[0] : null;
+    if (!root || typeof scene.queueRender !== 'function') return null;
+    const groups = [[], [], [], [], []];
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      groups[layerOfName(m && m.name)].push(o);
+      o.userData.y0 = o.position.y;
+      let sy = 1;                                       // 压缩时网格外面包了一层带缩放的组：位移要换算到网格自己的坐标里
+      for (let q = o.parent; q && q !== root; q = q.parent) sy *= q.scale.y;
+      o.userData.ys = 1 / sy;
+    });
+    return { scene, groups };
+  } catch (e) { return null; }
+}
+function restoreMat(mat) {
+  const o = mat.userData.orig;
+  if (!o) return;
+  if (mat.transparent !== o.transparent) { mat.transparent = o.transparent; mat.needsUpdate = true; }
+  mat.depthWrite = o.depthWrite;
+  mat.opacity = o.opacity;
+}
+function layerPose(k) {
+  const a = alpha[k];
+  for (const m of intern.groups[k]) {
+    m.position.y = m.userData.y0 + (cur[k] + LIFT * (1 - a)) * m.userData.ys;
+    const mat = m.material;
+    if (!mat.userData.orig) mat.userData.orig = { opacity: mat.opacity, transparent: mat.transparent, depthWrite: mat.depthWrite };
+    if (a <= 0.002) { m.visible = false; restoreMat(mat); }
+    else if (a >= 0.998) { m.visible = true; restoreMat(mat); }
+    else {
+      m.visible = true;
+      if (!mat.transparent) { mat.transparent = true; mat.needsUpdate = true; }
+      mat.depthWrite = false;
+      mat.opacity = mat.userData.orig.opacity * a;
+    }
+  }
+}
+const savedMat = new Map();
+function hideByMaterial(k, hide) {                     // 拿不到内部场景时的退路：材质设为全透明
+  for (const m of mv.model.materials) {
+    if (layerOfName(m.name) !== k) continue;
+    if (!savedMat.has(m)) savedMat.set(m, { mode: m.getAlphaMode(), cutoff: m.getAlphaCutoff(), color: [...m.pbrMetallicRoughness.baseColorFactor] });
+    const o = savedMat.get(m);
+    if (hide) { m.setAlphaMode('MASK'); m.setAlphaCutoff(0.5); m.pbrMetallicRoughness.setBaseColorFactor([o.color[0], o.color[1], o.color[2], 0]); }
+    else { m.setAlphaMode(o.mode); m.setAlphaCutoff(o.cutoff); m.pbrMetallicRoughness.setBaseColorFactor(o.color); }
+  }
+}
+function fadeLayer(k, to, dur = 750, delay = 0) {
+  if (!mv.model) return;
+  if (!intern) { alpha[k] = to; hideByMaterial(k, to < 0.5); return; }
+  const from = alpha[k];
+  if (Math.abs(from - to) < 1e-3) { tweens.delete('a' + k); return; }
+  tween('a' + k, dur * Math.max(0.35, Math.abs(to - from)), e => { alpha[k] = from + (to - from) * e; layerPose(k); }, delay);
+}
+function peelLevel() {
+  if (state.explode || state.level === 0 || state.level === 3 || state.layer == null) return 4;
+  return state.layer;
+}
+function applyVisibility(dur = 620) {                  // 揭开时自上而下依次淡出，盖回时自下而上依次落下
+  const top = peelLevel();
+  for (let k = 1; k < 5; k++) {
+    const to = k <= top ? 1 : 0;
+    fadeLayer(k, to, dur, to ? (k - 1) * 90 : (4 - k) * 90);
+  }
+  mv.iosSrc = (top <= 1 && !state.explode) ? USDZ_OPEN : USDZ_FULL;
+}
+
+// ---------- 镜头：沿一条抬高的弧线滑过去，目标点稍稍领先，视角张合同步缓动
+const DECAY = 110, EYE_R = 0.004;
+let flight = null;
+function camNow() {                                    // 当前（不是目标）镜头状态；视角取“取景视角”，与 field-of-view 属性同一口径
+  if (ctl) {
+    const sp = ctl.controls.getCameraSpherical(), t = ctl.scene.getDynamicTarget();
+    const T = [t.x, t.y, t.z];
+    return { T, C: add(T, sph(sp.theta, sp.phi, sp.radius)), theta: sp.theta, phi: sp.phi, radius: sp.radius, fov: ctl.scene.framedFoVDeg };
+  }
+  const o = mv.getCameraOrbit(), t = mv.getCameraTarget();
+  const T = [t.x, t.y, t.z];
+  return { T, C: add(T, sph(o.theta, o.phi, o.radius)), theta: o.theta, phi: o.phi, radius: o.radius, fov: mv.getFieldOfView() };
+}
+function setCamProps(T, th, ph, r, fov) {
+  mv.cameraTarget = `${T[0].toFixed(5)}m ${T[1].toFixed(5)}m ${T[2].toFixed(5)}m`;
+  mv.cameraOrbit = `${th.toFixed(5)}rad ${ph.toFixed(5)}rad ${r.toFixed(5)}m`;
+  mv.fieldOfView = `${fov.toFixed(2)}deg`;
+}
+function applyCam(T, th, ph, r, fov) {                 // 直接设到相机上，这一帧就生效（不经属性解析，也不经阻尼）
+  if (!ctl) { setCamProps(T, th, ph, r, fov); return; }
+  const c = ctl.controls, sc = ctl.scene;
+  c.changeSource = 'none';
+  c.setOrbit(th, ph, r);
+  sc.setTarget(T[0], T[1], T[2]);
+  sc.framedFoVDeg = fov;
+  c.setFieldOfView(sc.adjustedFoV(fov));
+  c.jumpToGoal();
+  sc.jumpToGoal();
+  sc.queueRender();
+}
+function syncProps() {                                 // 让 model-viewer 的属性与当前镜头一致，日后它重新解析属性时不会跳回旧位置
+  if (!ctl) return;
+  const s = camNow();
+  setCamProps(s.T, s.theta, s.phi, s.radius, s.fov);
+}
+function eyeMode(on) {                                 // 人视点允许略微仰视；直接改内部限制，不触发镜头跳位
+  if (ctl) ctl.controls.applyOptions({ maximumPolarAngle: rad(on ? 112 : 86) });
+  else mv.maxCameraOrbit = on ? 'auto 112deg auto' : 'auto 86deg auto';
+}
+function stopFlight() {
+  const f = flight;
+  flight = null;
+  if (!ctl) mv.interpolationDecay = DECAY;
+  if (f) { syncProps(); if (f.onCancel) f.onCancel(); }
+}
+function flyTo(view, opt = {}) {
+  stopFlight();
+  mv.autoRotate = false;
+  if (opt.eye) eyeMode(true);
+  const s = camNow();
+  // 先把镜头钉在当前位置并清掉惯性：点击时手指往往带了几像素的拖动，不钉住会先往那边弹一下再回来
+  if (ctl) applyCam(s.T, s.theta, s.phi, s.radius, s.fov);
+  else { setCamProps(s.T, s.theta, s.phi, s.radius, s.fov); mv.updateComplete.then(() => mv.jumpCameraToGoal()); }
+  const toEye = !!opt.eye;                              // 落到人视点
+  const FAR = 0.035;                                    // 飞行时注视前方 3.5 m 处，视线不会乱甩
+  const norm = v => mul(v, 1 / (len(v) || 1));
+  const T0 = s.radius < 0.01 ? add(s.C, mul(norm(sub(s.T, s.C)), FAR)) : s.T;
+  const C1 = add(view.target, sph(rad(view.theta), rad(view.phi), view.radius));
+  const look = mul(sph(rad(view.theta), rad(view.phi), 1), -1);
+  const T1 = toEye ? add(C1, mul(look, FAR)) : view.target;
+  const f1 = view.fov ?? (HOME ? HOME.fov : s.fov);
+  const f = flight = { onCancel: opt.onCancel };
+  const finish = () => {
+    if (flight === f) flight = null;
+    // 落地后把注视点收回到眼前 0.4 m：画面不变，之后拖动就像转头
+    applyCam(view.target, rad(view.theta), rad(view.phi), view.radius, f1);
+    if (!opt.eye) eyeMode(false);
+    if (ctl) syncProps(); else { mv.updateComplete.then(() => mv.jumpCameraToGoal()); mv.interpolationDecay = DECAY; }
+    if (opt.done) opt.done();
+  };
+  if (reduceMotion) { finish(); return; }
+  const d = len(sub(C1, s.C));
+  const lift = opt.lift ?? Math.min(0.16, d * 0.3);
+  // 三次贝塞尔：先抬起，再滑向目标。落到人视点时从稍后、稍高处顺着视线滑进去
+  const P1 = add(lerp(s.C, C1, 0.33), [0, lift, 0]);
+  const P2 = toEye && !opt.walk
+    ? add(add(C1, [0, Math.min(0.03, d * 0.25), 0]), mul(look, -Math.min(0.014, d * 0.12)))
+    : add(lerp(s.C, C1, 0.67), [0, lift, 0]);
+  const dur = opt.duration ?? (toEye ? clamp(1100 + d * 1700, 1200, 2800) : clamp(900 + d * 1500, 950, 2400));
+  const t0 = performance.now();
+  let prev = s.theta;
+  f.step = now => {
+    if (flight !== f) return;
+    const u = clamp((now - t0) / dur, 0, 1), e = smooth(u), g = 1 - e;
+    const C = s.C.map((x, i) => g * g * g * x + 3 * g * g * e * P1[i] + 3 * g * e * e * P2[i] + e * e * e * C1[i]);
+    const T = lerp(T0, T1, smooth(Math.min(1, u * 1.1)));
+    const off = sub(C, T), r = Math.max(len(off), 1e-5);
+    let th = Math.atan2(off[0], off[2]);
+    th += Math.round((prev - th) / (2 * Math.PI)) * 2 * Math.PI;
+    prev = th;
+    const ef = toEye ? smooth(clamp((u - 0.4) / 0.6, 0, 1)) : e;   // 广角在落地前才慢慢张开
+    applyCam(T, th, Math.acos(clamp(off[1] / r, -1, 1)), r, s.fov + (f1 - s.fov) * ef);
+    if (opt.onStep) opt.onStep(u);
+    if (u >= 1) finish();
+  };
+  if (ctl) { ctl.scene.queueRender(); return; }          // 由 model-viewer 的逐帧更新调用 f.step
+  mv.interpolationDecay = 20;                           // 退路：自己的 rAF 循环，用属性驱动
+  const loop = now => { if (flight !== f) return; f.step(now); if (flight === f) requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+// 穿过楼板的飞行：先把挡在上面的层淡出，快落地时再按新的状态淡回
+function flyThrough(view, opt, peelAbove) {
+  if (peelAbove == null || !intern || reduceMotion) { applyVisibility(); flyTo(view, opt); return; }
+  for (let k = peelAbove + 1; k < 5; k++) fadeLayer(k, 0, 380, (4 - k) * 50);
+  let done = false;
+  const restore = () => { if (!done) { done = true; applyVisibility(900); } };
+  const step = opt.onStep, end = opt.done;
+  flyTo(view, { ...opt, onStep: u => { if (u > 0.78) restore(); if (step) step(u); },
+                         done: () => { restore(); if (end) end(); }, onCancel: restore });
+}
+const thetaNow = () => deg(camNow().theta);       // 用实时镜头（model-viewer 公开的 getCameraOrbit 是缓存值，直控时不更新）
+function overviewView(exploded) {
+  if (exploded) return { target: [0, 0.22, 0], theta: thetaNow(), phi: 72, radius: 1.3, fov: HOME.fov };
+  return { target: HOME.target, theta: thetaNow(), phi: 62, radius: HOME.radius, fov: HOME.fov };
+}
+function layerView(k) {
+  const v = NAV.layers[k], off = state.explode ? NAV.explode[k] : 0;
+  return { target: [v.target[0], v.target[1] + off, v.target[2]], theta: thetaNow(), phi: v.phi, radius: v.radius, fov: HOME.fov };
+}
+function eyeViewFrom(v) {                              // 人视点：相机绕前方 0.4 m 处转动，拖动就像转头
+  const C = add(v.target, sph(rad(v.theta), rad(v.phi), v.radius));
+  const dir = mul(sph(rad(v.theta), rad(v.phi), 1), -1);
+  return { target: add(C, mul(dir, EYE_R)), theta: v.theta, phi: v.phi, radius: EYE_R, fov: v.fov || 58 };
+}
+const inside = () => state.level === 3;
+const insideLayer = () => Math.max(1, state.layer ?? 0);
+
+// ---------- 导航
+function sameView(v) {                                 // 镜头已经在这个视角（差不到 1 cm、半度）
+  const s = camNow(), C1 = add(v.target, sph(rad(v.theta), rad(v.phi), v.radius));
+  return len(sub(C1, s.C)) < 1e-4 && len(sub(v.target, s.T)) < 1e-4 && Math.abs((v.fov ?? s.fov) - s.fov) < 0.5;
+}
+function goOverview() {
+  if (!HOME) return;
+  if (state.level === 0 && !flight && sameView(overviewView(state.explode))) { toast('已经是全景了'); return; }
+  const from = inside() ? insideLayer() : null;
+  Object.assign(state, { level: 0, layer: null, zone: null, point: null, floor: null });
+  flyThrough(overviewView(state.explode), { done: () => { mv.autoRotate = !reduceMotion; } }, from);
+  render();
+}
+function goLayer(k) {
+  if (!HOME) return;
+  if (state.level === 1 && state.layer === k && !flight && sameView(layerView(k))) { toast(`已经在${LAYERS[k].short}了`); return; }
+  const from = inside() ? insideLayer() : null;
+  Object.assign(state, { level: 1, layer: k, zone: null, point: null, floor: null });
+  flyThrough(layerView(k), {}, from);
+  render();
+}
+function goSpot(key) {
+  if (!HOME) return;
+  const sp = NAV.spots[key], v = sp.view;
+  if (state.zone === key && state.level === (v.eye ? 3 : 2) && !flight) {
+    const t = v.target.slice();
+    if (!v.eye && state.explode) t[1] += NAV.explode[sp.layer];
+    if (sameView(v.eye ? eyeViewFrom(v) : { target: t, theta: v.theta, phi: v.phi, radius: v.radius, fov: HOME.fov })) { toast(`已经在${SPOT_TEXT[key][0]}了`); return; }
+  }
+  if (v.eye) {
+    if (state.explode) setExplode(false, false);
+    const sameFloor = inside() && state.layer === sp.layer;
+    const peel = sameFloor ? null : Math.max(1, inside() ? Math.min(state.layer ?? 0, sp.layer) : sp.layer);
+    Object.assign(state, { level: 3, layer: sp.layer, zone: key, point: sp.pos.slice(), floor: null });
+    flyThrough(eyeViewFrom(v), { eye: true, lift: sameFloor ? 0.015 : undefined }, peel);
+  } else {
+    const from = inside() ? insideLayer() : null;
+    Object.assign(state, { level: 2, layer: sp.layer, zone: key, point: sp.pos.slice(), floor: null });
+    const t = v.target.slice();
+    if (state.explode) t[1] += NAV.explode[sp.layer];
+    flyThrough({ target: t, theta: v.theta, phi: v.phi, radius: v.radius, fov: HOME.fov }, {}, from);
+  }
+  render();
+}
+function goPoint(p, zone, floorLike) {
+  if (!HOME) return;
+  const from = inside() ? insideLayer() : null;
+  const home = homeOf(zone);
+  const o = camNow();
+  Object.assign(state, { level: 2, zone, point: [p.x, p.y, p.z], floor: floorLike && !state.explode ? [p.x, p.y, p.z] : null });
+  if (home != null) state.layer = home;                // 湖面、底座边框：不改变当前揭到哪一层
+  flyThrough({ target: state.point, theta: deg(o.theta), phi: clamp(deg(o.phi), 38, 70),
+               radius: clamp(o.radius * 0.5, 0.07, 0.24), fov: HOME.fov }, {}, from);
+  render();
+}
+function goEye(p, zone) {
+  if (!HOME) return;
+  const s = camNow();
+  const E = [p[0], p[1] + 1.6 * S, p[2]];
+  const walking = inside();
+  let dir = walking ? sub(E, s.C) : sub(s.T, s.C);    // 走动时面朝走去的方向，从外面进来时保持当前朝向
+  dir[1] = 0;
+  if (len(dir) < 1e-5) dir = [-Math.sin(s.theta), 0, -Math.cos(s.theta)];
+  dir = mul(dir, 1 / len(dir));
+  const pitch = rad(-4);
+  const look = [dir[0] * Math.cos(pitch), Math.sin(pitch), dir[2] * Math.cos(pitch)];
+  const back = mul(look, -1);
+  const home = homeOf(zone);
+  const peel = walking ? null : Math.max(1, home ?? state.layer ?? 0);
+  Object.assign(state, { level: 3, zone, point: p.slice(), floor: p.slice() });
+  if (home != null) state.layer = home;
+  const view = { target: add(E, mul(look, EYE_R)), theta: deg(Math.atan2(back[0], back[2])), phi: deg(Math.acos(back[1])), radius: EYE_R, fov: 58 };
+  const dist = len(sub(E, s.C)) / S;                   // 走过去的实际距离（m）
+  flyThrough(view, walking ? { eye: true, walk: true, lift: 0, duration: clamp(600 + dist * 90, 700, 2000) } : { eye: true }, peel);
+  render();
+}
+function backToZone() {
+  if (!state.point) return goLayer(state.layer ?? 0);
+  if (NAV.spots[state.zone] && !NAV.spots[state.zone].view.eye) return goSpot(state.zone);
+  const from = inside() ? insideLayer() : null;
+  Object.assign(state, { level: 2 });
+  flyThrough({ target: state.point, theta: thetaNow(), phi: 55, radius: 0.12, fov: HOME.fov }, {}, from);
+  render();
+}
+function goUp() {
+  if (state.level === 3) return backToZone();
+  if (state.level === 2) return goLayer(state.layer ?? 0);
+  if (state.level === 1) return goOverview();
+}
+function setExplode(on, moveCamera = true) {
+  if (!intern) return;
+  state.explode = on;
+  $('explode').setAttribute('aria-pressed', String(on));
+  $('explode').textContent = on ? '合拢各层' : '分层展开';
+  $('layers').classList.toggle('exploded', on);
+  if (on && state.level >= 2) { state.level = state.layer == null ? 0 : 1; state.zone = null; }
+  for (let k = 1; k < 5; k++) {                        // 各层错开起步：展开时自下而上，合拢时自上而下
+    const from = cur[k], to = on ? NAV.explode[k] : 0;
+    tween('x' + k, 1500, e => { cur[k] = from + (to - from) * e; layerPose(k); placeHotspots(); }, on ? (k - 1) * 110 : (4 - k) * 110);
+  }
+  applyVisibility();
+  if (moveCamera) flyTo(state.level >= 1 && state.layer != null ? layerView(state.layer) : overviewView(on),
+                        { duration: 1700, done: () => { if (state.level === 0) mv.autoRotate = !reduceMotion; } });
+  render();
+}
+
+// ---------- 点击拾取：自建均匀网格。model-viewer 自带的拾取要把 36 万个三角形逐个测一遍（几十毫秒，手机上更久），
+//            点下去会卡一下才起飞；这里载入后在空闲时把三角形按层分进网格，点击时只测射线经过的几个格子
+const picker = { ready: false, layers: [], meshes: [] };
+function buildPicker(done) {
+  const root = intern.scene.models[0];
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const meshes = [];
+  for (let k = 0; k < 5; k++) for (const m of intern.groups[k]) {
+    const g = m.geometry, pos = g.attributes.position;
+    if (!pos) continue;
+    const mat = Array.isArray(m.material) ? m.material[0] : m.material, mo = (mat && mat.userData.orig) || mat;
+    if (mo && mo.transparent && mo.opacity < 0.5) continue;   // 透明玻璃不挡点击：射线穿过去，点到的是玻璃后面看得见的东西
+    const rel = inv.clone().multiply(m.matrixWorld).elements;   // 网格 → 模型坐标（此时各层都在原位）
+    meshes.push({ m, k, g, rel, name: (m.material && m.material.name) || '' });
+  }
+  picker.meshes = meshes;
+  const per = [[], [], [], [], []];
+  let i = 0;
+  const busy = () => flight || tweens.size;              // 镜头在飞、层在动时先不建，免得抢帧
+  const work = () => {                                        // 分片处理，每片约 6 ms，不阻塞画面
+    if (busy()) { setTimeout(work, 150); return; }
+    const t0 = performance.now();
+    while (i < meshes.length && performance.now() - t0 < 6) {
+      const M = meshes[i], e = M.rel, src = M.g.attributes.position;
+      const n = src.count, v = new Float32Array(n * 3);
+      for (let j = 0; j < n; j++) {
+        const x = src.getX(j), y = src.getY(j), z = src.getZ(j);
+        v[j * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
+        v[j * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+        v[j * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+      }
+      M.v = v;
+      M.idx = M.g.index ? M.g.index.array : null;
+      M.tris = M.idx ? M.idx.length / 3 : n / 3;
+      per[M.k].push(i);
+      i++;
+    }
+    if (i < meshes.length) { setTimeout(work, 0); return; }
+    let k = 0;
+    const grids = () => {
+      if (busy()) { setTimeout(grids, 150); return; }
+      picker.layers[k] = buildGrid(per[k]);
+      k++;
+      if (k < 5) setTimeout(grids, 0);
+      else { picker.ready = true; if (done) done(); }
+    };
+    setTimeout(grids, 0);
+  };
+  setTimeout(work, 0);
+}
+function triVerts(M, t, out) {
+  const a = M.idx ? M.idx[t * 3] : t * 3, b = M.idx ? M.idx[t * 3 + 1] : t * 3 + 1, c = M.idx ? M.idx[t * 3 + 2] : t * 3 + 2;
+  const v = M.v;
+  out[0] = v[a * 3]; out[1] = v[a * 3 + 1]; out[2] = v[a * 3 + 2];
+  out[3] = v[b * 3]; out[4] = v[b * 3 + 1]; out[5] = v[b * 3 + 2];
+  out[6] = v[c * 3]; out[7] = v[c * 3 + 1]; out[8] = v[c * 3 + 2];
+}
+function buildGrid(meshIds) {
+  let total = 0;
+  for (const id of meshIds) total += picker.meshes[id].tris;
+  if (!total) return null;
+  const triMesh = new Uint16Array(total), triLocal = new Uint32Array(total);
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const tv = new Float32Array(9);
+  let g = 0;
+  for (const id of meshIds) {
+    const M = picker.meshes[id];
+    for (let t = 0; t < M.tris; t++, g++) {
+      triMesh[g] = id; triLocal[g] = t;
+      triVerts(M, t, tv);
+      for (let c = 0; c < 9; c++) { const ax = c % 3; if (tv[c] < lo[ax]) lo[ax] = tv[c]; if (tv[c] > hi[ax]) hi[ax] = tv[c]; }
+    }
+  }
+  for (let ax = 0; ax < 3; ax++) { lo[ax] -= 1e-4; hi[ax] += 1e-4; }
+  const ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+  const cell = Math.cbrt(ext[0] * ext[1] * ext[2] / clamp(total / 3, 64, 60000));
+  const dim = ext.map(e => clamp(Math.ceil(e / cell), 1, 128));
+  const cs = ext.map((e, ax) => e / dim[ax]);
+  const nCells = dim[0] * dim[1] * dim[2];
+  const count = new Uint32Array(nCells + 1);
+  const range = (t, cb) => {                                  // 三角形包围盒覆盖的格子
+    let x0 = Math.min(tv[0], tv[3], tv[6]), x1 = Math.max(tv[0], tv[3], tv[6]);
+    let y0 = Math.min(tv[1], tv[4], tv[7]), y1 = Math.max(tv[1], tv[4], tv[7]);
+    let z0 = Math.min(tv[2], tv[5], tv[8]), z1 = Math.max(tv[2], tv[5], tv[8]);
+    const i0 = clamp(Math.floor((x0 - lo[0]) / cs[0]), 0, dim[0] - 1), i1 = clamp(Math.floor((x1 - lo[0]) / cs[0]), 0, dim[0] - 1);
+    const j0 = clamp(Math.floor((y0 - lo[1]) / cs[1]), 0, dim[1] - 1), j1 = clamp(Math.floor((y1 - lo[1]) / cs[1]), 0, dim[1] - 1);
+    const k0 = clamp(Math.floor((z0 - lo[2]) / cs[2]), 0, dim[2] - 1), k1 = clamp(Math.floor((z1 - lo[2]) / cs[2]), 0, dim[2] - 1);
+    for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) cb((kk * dim[1] + jj) * dim[0] + ii);
+  };
+  for (let t = 0; t < total; t++) { triVerts(picker.meshes[triMesh[t]], triLocal[t], tv); range(t, c => { count[c + 1]++; }); }
+  for (let c = 0; c < nCells; c++) count[c + 1] += count[c];
+  const items = new Uint32Array(count[nCells]);
+  const fill = count.slice(0, nCells);
+  for (let t = 0; t < total; t++) { triVerts(picker.meshes[triMesh[t]], triLocal[t], tv); range(t, c => { items[fill[c]++] = t; }); }
+  return { lo, hi, dim, cs, start: count, items, triMesh, triLocal, stamp: new Uint32Array(total), mark: 0 };
+}
+const _tv = new Float32Array(9);
+function castGrid(G, o, d, maxT) {                            // 3D DDA 逐格前进，格内测三角形（双面），先命中先停
+  if (!G) return null;
+  let t0 = 0, t1 = maxT;
+  for (let ax = 0; ax < 3; ax++) {
+    if (Math.abs(d[ax]) < 1e-12) { if (o[ax] < G.lo[ax] || o[ax] > G.hi[ax]) return null; continue; }
+    let a = (G.lo[ax] - o[ax]) / d[ax], b = (G.hi[ax] - o[ax]) / d[ax];
+    if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    if (t0 > t1) return null;
+  }
+  const { dim, cs, lo } = G;
+  const p = [o[0] + d[0] * t0, o[1] + d[1] * t0, o[2] + d[2] * t0];
+  const c = p.map((v, ax) => clamp(Math.floor((v - lo[ax]) / cs[ax]), 0, dim[ax] - 1));
+  const stepI = d.map(v => v > 0 ? 1 : -1);
+  const tMax = c.map((ci, ax) => Math.abs(d[ax]) < 1e-12 ? Infinity : (lo[ax] + (ci + (d[ax] > 0 ? 1 : 0)) * cs[ax] - o[ax]) / d[ax]);
+  const tDelta = d.map((v, ax) => Math.abs(v) < 1e-12 ? Infinity : cs[ax] / Math.abs(v));
+  G.mark++;
+  if (G.mark > 4e9) { G.stamp.fill(0); G.mark = 1; }
+  let best = maxT, bestTri = -1, bn = null;
+  for (let guard = 0; guard < 4096; guard++) {
+    const cell = (c[2] * dim[1] + c[1]) * dim[0] + c[0];
+    for (let q = G.start[cell], qe = G.start[cell + 1]; q < qe; q++) {
+      const t = G.items[q];
+      if (G.stamp[t] === G.mark) continue;
+      G.stamp[t] = G.mark;
+      const M = picker.meshes[G.triMesh[t]];
+      if (!M.m.visible) continue;
+      triVerts(M, G.triLocal[t], _tv);
+      const e1x = _tv[3] - _tv[0], e1y = _tv[4] - _tv[1], e1z = _tv[5] - _tv[2];
+      const e2x = _tv[6] - _tv[0], e2y = _tv[7] - _tv[1], e2z = _tv[8] - _tv[2];
+      const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+      const det = e1x * px + e1y * py + e1z * pz;
+      if (Math.abs(det) < 1e-14) continue;
+      const inv = 1 / det;
+      const sx = o[0] - _tv[0], sy = o[1] - _tv[1], sz = o[2] - _tv[2];
+      const u = (sx * px + sy * py + sz * pz) * inv;
+      if (u < 0 || u > 1) continue;
+      const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+      const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+      if (v < 0 || u + v > 1) continue;
+      const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+      if (tt > 1e-7 && tt < best) {
+        best = tt; bestTri = t;
+        let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+        const nl = Math.hypot(nx, ny, nz) || 1;
+        nx /= nl; ny /= nl; nz /= nl;
+        if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; }   // 法线朝向相机
+        bn = [nx, ny, nz];
+      }
+    }
+    const ax = tMax[0] < tMax[1] ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2);
+    if (best <= tMax[ax] || tMax[ax] > t1) break;            // 已命中的点在当前格子以内，或射线出了网格
+    c[ax] += stepI[ax];
+    if (c[ax] < 0 || c[ax] >= dim[ax]) break;
+    tMax[ax] += tDelta[ax];
+  }
+  return bestTri < 0 ? null : { t: best, n: bn, mesh: picker.meshes[G.triMesh[bestTri]] };
+}
+function rayAt(clientX, clientY) {                            // 屏幕上一点 → 模型坐标里的射线（起点、单位方向、近远裁剪面间的长度）
+  const cam = intern.scene.getCamera(), rc = mv.getBoundingClientRect();
+  const nx = (clientX - rc.left) / rc.width * 2 - 1, ny = -((clientY - rc.top) / rc.height * 2 - 1);
+  const ep = cam.projectionMatrixInverse.elements, ew = cam.matrixWorld.elements;
+  const unproject = z => {
+    const x = ep[0] * nx + ep[4] * ny + ep[8] * z + ep[12], y = ep[1] * nx + ep[5] * ny + ep[9] * z + ep[13];
+    const zz = ep[2] * nx + ep[6] * ny + ep[10] * z + ep[14], w = ep[3] * nx + ep[7] * ny + ep[11] * z + ep[15];
+    const vx = x / w, vy = y / w, vz = zz / w;
+    return [ew[0] * vx + ew[4] * vy + ew[8] * vz + ew[12], ew[1] * vx + ew[5] * vy + ew[9] * vz + ew[13], ew[2] * vx + ew[6] * vy + ew[10] * vz + ew[14]];
+  };
+  const a = unproject(-1), b = unproject(1);
+  const root = intern.scene.models[0];
+  const ei = root.matrixWorld.clone().invert().elements;
+  const toLocal = (p, w) => [ei[0] * p[0] + ei[4] * p[1] + ei[8] * p[2] + ei[12] * w, ei[1] * p[0] + ei[5] * p[1] + ei[9] * p[2] + ei[13] * w, ei[2] * p[0] + ei[6] * p[1] + ei[10] * p[2] + ei[14] * w];
+  const o = toLocal(a, 1);
+  let d = toLocal(sub(b, a), 0);
+  const L = len(d); d = mul(d, 1 / L);
+  return { o, d, L };
+}
+function pick(clientX, clientY) {                             // 返回模型坐标里的点、朝向相机的法线、材质名、命中距离
+  if (!picker.ready) {
+    const hit = mv.positionAndNormalFromPoint(clientX, clientY);
+    if (!hit) return null;
+    const mat = mv.materialFromPoint(clientX, clientY);
+    return { p: [hit.position.x, hit.position.y, hit.position.z], ny: hit.normal.y, name: mat ? mat.name : '' };
+  }
+  const { o, d, L } = rayAt(clientX, clientY);
+  let best = null;
+  for (let k = 0; k < 5; k++) {
+    if (alpha[k] < 0.5) continue;                             // 正在揭开或已揭开的层点不到
+    const off = cur[k] + LIFT * (1 - alpha[k]);
+    const h = castGrid(picker.layers[k], [o[0], o[1] - off, o[2]], d, best ? best.t : L);
+    if (h) best = h;
+  }
+  if (!best) return null;
+  return { p: add(o, mul(d, best.t)), ny: best.n[1], name: best.mesh.name, d: best.t };
+}
+function pickNear(x, y) {                              // 点偏了一点（紧挨着模型的空白处）也算：在周围几圈里找离镜头最近的命中
+  const h = pick(x, y);
+  if (h || !picker.ready || state.level === 3) return h;
+  for (const r of [10, 18, 27, 36]) {
+    const n = Math.round(r * 0.75);
+    let best = null;
+    for (let i = 0; i < n; i++) {
+      const a = (i + 0.5) / n * 2 * Math.PI, q = pick(x + r * Math.cos(a), y + r * Math.sin(a));
+      if (q && (!best || q.d < best.d)) best = q;
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+// ---------- 点击模型：飞过去；已经在近处时点地面就走过去
+let down = null;
+for (const ev of ['pointerdown', 'wheel', 'keydown']) mv.addEventListener(ev, () => { if (flight) stopFlight(); }, { passive: true });
+mv.addEventListener('pointerdown', e => {
+  down = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, hit: null };   // 用事件发生的时刻计时：主线程一忙，处理会晚，但手指其实早抬起来了
+  // 记下按下那一刻手指下的点：触屏轻点时手指往旁边挪几个像素，模型就跟着转了，抬手时手指下已经换了地方
+  if (picker.ready && mv.loaded && e.target === mv) down.hit = pick(e.clientX, e.clientY);
+});
+mv.addEventListener('pointerup', e => {
+  if (!down || e.pointerId !== down.id) return;
+  const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = e.timeStamp - down.t, downHit = down.hit;
+  down = null;
+  const slop = e.pointerType === 'mouse' ? 7 : 12;     // 手指点下去难免挪几个像素：触屏放宽，免得轻点被当成拖动
+  if (moved > slop || dt > 1000 || !mv.loaded) return;
+  if (e.target !== mv) return;                         // 标注点、AR 按钮自己处理
+  const hit = downHit || pickNear(e.clientX, e.clientY);
+  tapRing(e.clientX, e.clientY, !hit && state.level !== 3);
+  if (!hit) {                                          // 空白处：人视点里转头看过去，其余时候说一声
+    if (state.level === 3) lookToward(e.clientX, e.clientY);
+    else toast('这里是空白处，点在模型上镜头才会飞过去');
+    return;
+  }
+  const pt = { x: hit.p[0], y: hit.p[1], z: hit.p[2] };
+  const zone = classify(pt, hit.name);
+  if (NAV.spots[zone] && ART_WALL.includes(zone)) return goSpot(zone);   // 点画：站到那面画墙前
+  const floorLike = hit.ny > 0.7;
+  if (state.level >= 2 && floorLike && WALK.has(zone) && !state.explode) goEye(hit.p, zone);
+  else goPoint(pt, zone, floorLike && WALK.has(zone));
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.level > 0) goUp(); });
+function tapRing(x, y, miss) {
+  if (reduceMotion) return;
+  const rc = mv.getBoundingClientRect(), el = document.createElement('span');
+  el.className = 'tap-ring' + (miss ? ' miss' : '');
+  el.setAttribute('aria-hidden', 'true');
+  el.style.left = (x - rc.left) + 'px';
+  el.style.top = (y - rc.top) + 'px';
+  mv.appendChild(el);
+  setTimeout(() => el.remove(), 700);
+}
+function lookToward(x, y) {                            // 人视点：原地转头，看向点到的方向（天空、远处）
+  if (!intern || !HOME) return;
+  const { d } = rayAt(x, y), s = camNow();
+  const pitch = clamp(Math.asin(clamp(d[1], -1, 1)), rad(-30), rad(20));   // 仰角受人视点的转动范围限制（最多抬头 22°）
+  const h = Math.hypot(d[0], d[2]) || 1;
+  const look = [d[0] / h * Math.cos(pitch), Math.sin(pitch), d[2] / h * Math.cos(pitch)];
+  const now = sub(s.T, s.C), nl = len(now) || 1;
+  const ang = Math.acos(clamp((now[0] * look[0] + now[1] * look[1] + now[2] * look[2]) / nl, -1, 1));
+  const back = mul(look, -1);
+  flyTo({ target: add(s.C, mul(look, EYE_R)), theta: deg(Math.atan2(back[0], back[2])), phi: deg(Math.acos(back[1])), radius: EYE_R, fov: s.fov },
+        { eye: true, walk: true, lift: 0, duration: clamp(450 + deg(ang) * 7, 550, 1300) });
+}
+
+// ---------- 标注点：只显示当前层的，出现和隐去都带缓动
+const hotspots = {};
+for (const key of Object.keys(NAV.spots)) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'hotspot off';
+  b.hidden = true;                                       // 隐去后彻底移出版面：model-viewer 给标注包的外层会挡住拖动和点击
+  b.slot = 'hotspot-' + key;
+  b.dataset.position = NAV.spots[key].pos.map(v => v + 'm').join(' ');
+  b.tabIndex = -1;
+  b.setAttribute('aria-hidden', 'true');
+  b.innerHTML = '<span class="num" aria-hidden="true"></span><span class="tag" aria-hidden="true"></span>';
+  b.querySelector('.tag').textContent = SPOT_TEXT[key][0];
+  b.setAttribute('aria-label', SPOT_TEXT[key][0]);
+  b.addEventListener('click', ev => { ev.stopPropagation(); goSpot(key); });
+  mv.appendChild(b);
+  hotspots[key] = b;
+}
+let declutterTimer = 0, lastDeclutter = -1e9;
+function declutter() {                                 // 标注文字互相压住时先翻到圆点左边，两边都压着就只留编号，免得点了去错地方
+  const rc = mv.getBoundingClientRect(), list = [];
+  for (const [key, b] of Object.entries(hotspots)) {
+    if (b.hidden || b.classList.contains('off')) continue;
+    const r = b.getBoundingClientRect(), tag = b.querySelector('.tag');
+    const ext = Math.max(0, -parseFloat(getComputedStyle(b, '::before').left) || 0);   // 触屏上放大的命中圈
+    list.push({ b, on: key === state.zone, cx: r.left + r.width / 2, cy: r.top + r.height / 2, R: b.offsetWidth / 2 + ext, w: tag.offsetWidth, h: tag.offsetHeight });
+  }
+  list.sort((a, c) => c.on - a.on);                    // 当前所在位置的文字优先
+  const boxes = list.map(o => [o.cx - o.R, o.cy - o.R, o.cx + o.R, o.cy + o.R]);
+  const free = (q, self) => q[0] > rc.left + 2 && q[2] < rc.right - 2 && q[1] > rc.top && q[3] < rc.bottom &&
+    !boxes.some((r, i) => i !== self && q[0] < r[2] + 3 && q[2] > r[0] - 3 && q[1] < r[3] + 3 && q[3] > r[1] - 3);
+  const cls = list.map((o, i) => {
+    if (!o.w) return '';                               // 手机上不显示文字
+    const right = [o.cx + o.R + 6, o.cy - o.h / 2, o.cx + o.R + 6 + o.w, o.cy + o.h / 2];
+    const left = [o.cx - o.R - 6 - o.w, o.cy - o.h / 2, o.cx - o.R - 6, o.cy + o.h / 2];
+    if (free(right, i)) { boxes.push(right); return ''; }
+    if (free(left, i)) { boxes.push(left); return 'tag-left'; }
+    return 'tag-hide';
+  });
+  list.forEach((o, i) => { o.b.classList.toggle('tag-left', cls[i] === 'tag-left'); o.b.classList.toggle('tag-hide', cls[i] === 'tag-hide'); });
+}
+function queueDeclutter() {                            // 镜头动的时候每 0.12 s 重排一次，停下后再排最后一次
+  const now = performance.now();
+  if (now - lastDeclutter > 120) { lastDeclutter = now; requestAnimationFrame(declutter); }
+  clearTimeout(declutterTimer);
+  declutterTimer = setTimeout(() => requestAnimationFrame(() => { lastDeclutter = performance.now(); declutter(); }), 150);
+}
+mv.addEventListener('camera-change', queueDeclutter);
+function placeHotspots() {
+  if (!mv.loaded) return;
+  for (const [key, b] of Object.entries(hotspots)) {
+    if (b.hidden) continue;
+    const sp = NAV.spots[key], p = sp.pos;
+    mv.updateHotspot({ name: 'hotspot-' + key, position: `${p[0]}m ${p[1] + cur[sp.layer]}m ${p[2]}m` });
+  }
+  queueDeclutter();
+}
+function showHotspots() {
+  const k = state.level >= 1 && state.level < 3 ? state.layer : null;
+  $('labels').disabled = k == null;                    // 全景、人视点里没有编号标注：按钮暂时停用，免得点了没反应
+  $('labels').title = k == null ? '进入某一层后才有编号标注' : '';
+  for (const [key, b] of Object.entries(hotspots)) {
+    const on = k != null && NAV.spots[key].layer === k;
+    clearTimeout(b._hide);
+    if (on && b.hidden) {                                // 先放回版面，下一帧再淡入
+      b.hidden = false;
+      b.classList.add('off');
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (!b.hidden) b.classList.remove('off'); }));
+    } else if (on) b.classList.remove('off');
+    else if (!b.hidden) {                                // 淡出结束后移出版面
+      b.classList.add('off');
+      b._hide = setTimeout(() => { if (b.classList.contains('off')) b.hidden = true; }, reduceMotion ? 0 : 500);
+    }
+    b.tabIndex = on ? 0 : -1;
+    b.setAttribute('aria-hidden', on ? 'false' : 'true');
+    b.classList.toggle('on', key === state.zone);
+    if (on) b.querySelector('.num').textContent = spotKeys(k).indexOf(key) + 1;
+  }
+  placeHotspots();
+}
+
+// ---------- 层次索引（自上而下排列）
+const layerItems = [];
+for (let k = 4; k >= 0; k--) {
+  const L = LAYERS[k];
+  const li = document.createElement('li');
+  li.className = 'layer';
+  li.style.setProperty('--w', L.w);
+  li.innerHTML = `<button type="button" class="layer-btn"><span class="lv-no">${k + 1}</span><span class="lv-name"></span><span class="lv-elev"></span><span class="lv-bar" aria-hidden="true"></span></button><div class="sub-wrap"><ol class="sub"></ol></div>`;
+  li.querySelector('.lv-name').textContent = L.name;
+  li.querySelector('.lv-name').insertAdjacentHTML('beforeend', '<span class="peeled-tag">已揭开</span>');
+  li.querySelector('.lv-elev').textContent = `${L.tag} ${L.elev}`;
+  li.querySelector('.layer-btn').addEventListener('click', () => goLayer(k));
+  const sub = li.querySelector('.sub');
+  spotKeys(k).forEach((key, i) => {
+    const s = document.createElement('li');
+    s.innerHTML = '<button type="button"><span class="n"></span><span class="t"></span></button>';
+    s.querySelector('.n').textContent = i + 1;
+    s.querySelector('.t').textContent = SPOT_TEXT[key][0];
+    if (NAV.spots[key].view.eye) s.querySelector('button').insertAdjacentHTML('beforeend', '<span class="eye">人视点</span>');
+    s.querySelector('button').dataset.spot = key;
+    s.querySelector('button').addEventListener('click', () => goSpot(key));
+    sub.appendChild(s);
+  });
+  $('layers').appendChild(li);
+  layerItems[k] = li;
+}
+
+// ---------- 界面刷新：路径、说明卡、提示、索引（文字换场时淡出再淡入）
+function crumb(label, fn) {
+  const li = document.createElement('li');
+  if (fn) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.addEventListener('click', fn); li.appendChild(b); }
+  else { li.textContent = label; li.setAttribute('aria-current', 'location'); }
+  return li;
+}
+function action(label, fn, primary) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.textContent = label; if (primary) b.className = 'primary';
+  b.addEventListener('click', fn);
+  return b;
+}
+const swapTimers = new Map();
+function swap(el, key, fill) {                         // 内容变了才换：先淡出，换字，再淡入
+  if (el.dataset.key === key) { fill(); return; }
+  el.dataset.key = key;
+  clearTimeout(swapTimers.get(el));
+  if (reduceMotion) { fill(); return; }
+  el.classList.add('swapping');
+  swapTimers.set(el, setTimeout(() => { fill(); el.classList.remove('swapping'); }, 170));
+}
+let lastHint = '', toastTimer = 0;
+function toast(msg, ms = 2400) {                       // 提示条临时换成一句话，过一会儿换回当前的操作提示
+  const el = $('hint');
+  clearTimeout(toastTimer);
+  swap(el, 'toast:' + msg, () => { el.textContent = msg; });
+  toastTimer = setTimeout(() => { toastTimer = 0; swap(el, lastHint, () => { el.textContent = lastHint; }); }, ms);
+}
+function render() {
+  const { level, layer, zone } = state;
+  const L = layer != null ? LAYERS[layer] : null;
+  const labels = ['全景'];
+  if (level >= 1 && L) labels.push(L.short);
+  if (level >= 2 && zone && !(L && textOf(zone)[0] === L.short)) labels.push(textOf(zone)[0]);
+  if (level === 3) labels.push('人视点');
+  const sig = labels.join('›');
+  if ($('crumbs').dataset.sig !== sig) {
+    $('crumbs').dataset.sig = sig;
+    const fns = [goOverview, () => goLayer(layer), backToZone];
+    $('crumbs').replaceChildren(...labels.map((t, i) => crumb(t, i < labels.length - 1 ? fns[i] : null)));
+  }
+
+  const acts = [];
+  let kicker = '全景', name = '云上潮汐馆', desc = '浮在湖面上的展馆：三片新月形屋顶层层错落，中间是与湖相通的潮池庭院。', hint = '点模型任意处，镜头滑过去';
+  if (level === 0) {
+    acts.push(action('从最上层往下看', () => goLayer(4), true));
+  } else if (level === 1) {
+    kicker = `第 ${layer + 1} 层 · ${L.tag} ${L.elev}`; name = L.name; desc = L.d;
+    hint = '点这一层上的任何地方，或点编号';
+    if (layer > 0) acts.push(action('往下一层', () => goLayer(layer - 1), true));
+    if (layer < 4) acts.push(action('往上一层', () => goLayer(layer + 1)));
+  } else {
+    const [n, d] = textOf(zone);
+    kicker = L ? `第 ${layer + 1} 层 · ${L.short}` : '底座';
+    name = n; desc = d;
+    const sp = NAV.spots[zone];
+    if (level === 2) {
+      hint = state.explode ? '合拢各层后可以站进去' : '再点一下地面，就走到那里';
+      if (!state.explode && sp && sp.view.eye) acts.push(action('站到这里看', () => goSpot(zone), true));
+      else if (!state.explode && state.floor) acts.push(action('站到这里看', () => goEye(state.floor, zone), true));
+      if (layer != null) acts.push(action(`回到${LAYERS[layer].short}`, () => goLayer(layer)));
+    } else {
+      kicker += ' · 人视点';
+      hint = '点地面走过去 · 拖动转头 · Esc 返回';
+      acts.push(action('退出人视点', backToZone, true));
+      if (layer != null) acts.push(action(`回到${LAYERS[layer].short}`, () => goLayer(layer)));
+    }
+  }
+  swap($('placeBody'), `${level}|${layer}|${zone}|${state.explode}`, () => {
+    $('placeKicker').textContent = kicker;
+    $('placeName').textContent = name;
+    $('placeDesc').textContent = desc;
+    $('placeActions').replaceChildren(...acts);
+  });
+  lastHint = hint;
+  clearTimeout(toastTimer); toastTimer = 0;
+  swap($('hint'), hint, () => { $('hint').textContent = hint; });
+
+  const top = peelLevel();
+  layerItems.forEach((li, k) => {
+    li.classList.toggle('is-active', level >= 1 && k === layer);
+    li.classList.toggle('is-peeled', k > top);
+    li.querySelector('.layer-btn').setAttribute('aria-current', level >= 1 && k === layer ? 'true' : 'false');
+    li.querySelectorAll('.sub button').forEach(b => b.setAttribute('aria-current', b.dataset.spot === zone ? 'true' : 'false'));
+  });
+  showHotspots();
+}
+
+$('explode').addEventListener('click', () => setExplode(!state.explode));
+$('labels').addEventListener('click', () => {
+  const on = $('labels').getAttribute('aria-pressed') !== 'true';
+  $('labels').setAttribute('aria-pressed', String(on));
+  mv.classList.toggle('no-labels', !on);
+});
+$('home').addEventListener('click', goOverview);
+
+// ---------- 载入
+const bar = $('progress');
+mv.addEventListener('progress', e => {
+  const p = e.detail.totalProgress;
+  bar.firstElementChild.style.transform = `scaleX(${p})`;
+  if (p >= 1) bar.classList.add('done');
+});
+mv.addEventListener('load', () => {
+  bar.classList.add('done');
+  const water = mv.model && mv.model.getMaterialByName('AR_Water');   // 网页影棚灯光下把水面调粗糙些，免得一大块反光
+  if (water) water.pbrMetallicRoughness.setRoughnessFactor(0.24);
+  intern = grabInternals();
+  ctl = hookFrames();
+  if (!intern) { $('explode').disabled = true; $('explode').title = '当前浏览器里不能分层展开'; }
+  else setTimeout(() => buildPicker(), 200);
+  requestAnimationFrame(() => requestAnimationFrame(() => {            // 记下默认取景，作为“全景”
+    const s = camNow();
+    HOME = { target: s.T, radius: s.radius, fov: s.fov };
+    eyeMode(false);
+  }));
+  render();
+  setTimeout(() => {
+    $('arState').textContent = mv.canActivateAR
+      ? '这台设备可以直接进入 AR：点模型右下角的「在 AR 中查看」。'
+      : '这里不能直接启动 AR（电脑浏览器和部分应用内页面都是这样），请按下方方法在手机上打开。';
+  }, 400);
+});
+mv.addEventListener('error', () => { $('arState').textContent = '模型没有载入成功，请刷新页面再试。'; });
+render();
+
+customElements.whenDefined('model-viewer').then(async () => {
+  customElements.get('model-viewer').meshoptDecoderLocation = 'https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_decoder.js';
+  try {
+    const res = await fetch('model/pavilion_ar.json');
+    const j = await res.json();
+    const bin = Uint8Array.from(atob(j.data), c => c.charCodeAt(0));
+    mv.src = URL.createObjectURL(new Blob([bin], { type: 'model/gltf-binary' }));
+  } catch (err) {
+    $('arState').textContent = '模型文件没有取到，请刷新页面再试。';
+  }
+});
+window.__nav = { state, goLayer, goSpot, goOverview, goPoint, goEye, setExplode, classify, get intern() { return intern; }, get flying() { return !!flight; }, get alpha() { return alpha.slice(); }, get lift() { return cur.slice(); }, pick, picker, castGrid, get ctl() { return !!ctl; }, camNow };
+</script>
