@@ -31,8 +31,6 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 </style>
 <div id="stage">
   <canvas id="gl"></canvas>
-  <div class="still" id="stillA"><img alt=""></div>
-  <div class="still" id="stillB"><img alt=""></div>
   <div class="shade" id="shade"></div>
   <div class="cap" id="cap"><p class="kicker"></p><h2></h2><p class="sub"></p></div>
   <div class="title" id="titleOpen"><p class="en">CLOUD TIDE PAVILION</p><h1>云上潮汐馆</h1><div class="rule"></div><p class="zh">湖上展馆 · 潮汐庭院 · 冬至日落轴线</p></div>
@@ -283,18 +281,17 @@ function poseAt(seg, t) {
 // =====================================================================================
 // 逐帧
 // =====================================================================================
-const imgs = {};
-await Promise.all(STILL.map(async s => {
-  if (imgs[s.img]) return;
-  const im = new Image(); im.src = `img/${s.img}.jpg`;
+// 每张渲染图各占一层，载入时就解码好：渲染时不再切换图片，第一帧也不会空着
+for (const s of STILL) {
+  const div = document.createElement('div'), im = document.createElement('img');
+  div.className = 'still'; im.alt = ''; im.src = `img/${s.img}.jpg`;
+  div.appendChild(im); $('shade').before(div);
   await im.decode();
-  imgs[s.img] = im;
-}));
+  s.layer = div; s.im = im;
+}
 await document.fonts.ready;
 await Promise.all(['600 50px "Noto Serif SC"', '400 32px "Noto Serif SC"', '400 25px "Noto Sans SC"', '500 21px "Noto Sans SC"']
   .map(f => document.fonts.load(f, '云上潮汐馆冬至日落轴线展廊坡道月洞墙')));
-const layers = [$('stillA'), $('stillB')];
-STILL.forEach((s, i) => { s.layer = layers[i % 2]; });
 
 function fadeWin(t, t0, t1, fin, fout) {
   if (t < t0 || t > t1) return 0;
@@ -309,9 +306,7 @@ function tideAt(t) {
   return 0;
 }
 function placeStill(s, t) {
-  const el = s.layer, im = el.firstElementChild;
-  if (im.dataset.src !== s.img) { im.src = imgs[s.img].src; im.dataset.src = s.img; }
-  const ia = imgs[s.img].naturalWidth / imgs[s.img].naturalHeight, sa = W / H;
+  const im = s.im, ia = im.naturalWidth / im.naturalHeight, sa = W / H;
   const w = ia > sa ? H * ia : W, h = ia > sa ? H : W / ia;               // 铺满画面（宽幅图左右溢出，16:10 图上下各裁 5%）
   const k = smooth((t - (s.kbFrom ?? s.t0)) / (s.t1 - (s.kbFrom ?? s.t0)));
   const sc = lerp(s.kb[0], s.kb[1], k), x = lerp(s.kb[2], s.kb[3], k) * W;
@@ -321,7 +316,7 @@ function placeStill(s, t) {
 function frame(t) {
   // 渲染图
   let covered = false;
-  for (const el of layers) el.style.opacity = 0;
+  for (const s of STILL) s.layer.style.opacity = 0;
   for (const s of STILL) {
     const o = fadeWin(t, s.t0, s.t1, s.fin ?? XF, s.fout ?? XF);
     if (o <= 0) continue;
